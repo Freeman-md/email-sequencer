@@ -4,9 +4,9 @@ import { z } from 'zod';
 const schema = z.object({
   AIRTABLE_API_TOKEN: z.string().min(1),
   AIRTABLE_BASE_ID: z.string().regex(/^app[a-zA-Z0-9]{14}$/),
-  GOOGLE_CLIENT_ID: z.string().min(1),
-  GOOGLE_CLIENT_SECRET: z.string().min(1),
-  GOOGLE_REDIRECT_URI: z.url().refine((value) => {
+  EMAIL_SEQUENCER_GOOGLE_CLIENT_ID: z.string().min(1),
+  EMAIL_SEQUENCER_GOOGLE_CLIENT_SECRET: z.string().min(1),
+  EMAIL_SEQUENCER_GOOGLE_REDIRECT_URI: z.url().refine((value) => {
     const url = new URL(value);
     return (
       url.pathname === '/api/gmail/callback' &&
@@ -37,5 +37,5 @@ export function getConfig(): Config {
 }
 
 export function appOrigin() {
-  return new URL(getConfig().GOOGLE_REDIRECT_URI).origin;
+  return new URL(getConfig().EMAIL_SEQUENCER_GOOGLE_REDIRECT_URI).origin;
 }

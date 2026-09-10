@@ -14,9 +14,9 @@ const pending = (globalOAuth.gmailOAuthPending ??= new Map());
 export function createOAuthClient() {
   const config = getConfig();
   return new OAuth2Client({
-    clientId: config.GOOGLE_CLIENT_ID,
-    clientSecret: config.GOOGLE_CLIENT_SECRET,
-    redirectUri: config.GOOGLE_REDIRECT_URI,
+    clientId: config.EMAIL_SEQUENCER_GOOGLE_CLIENT_ID,
+    clientSecret: config.EMAIL_SEQUENCER_GOOGLE_CLIENT_SECRET,
+    redirectUri: config.EMAIL_SEQUENCER_GOOGLE_REDIRECT_URI,
     transporterOptions: { timeout: 20_000, retry: false },
   });
 }
@@ -68,7 +68,7 @@ export async function finishOAuth(
       throw new Error('Missing permissions');
     const ticket = await client.verifyIdToken({
       idToken: tokens.id_token,
-      audience: getConfig().GOOGLE_CLIENT_ID,
+      audience: getConfig().EMAIL_SEQUENCER_GOOGLE_CLIENT_ID,
     });
     const identity = ticket.getPayload();
     if (!identity?.email || !identity.email_verified)

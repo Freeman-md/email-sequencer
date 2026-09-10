@@ -31,7 +31,7 @@ Table IDs and field mappings are centralized in `src/features/sequencer/constant
 1. Create/select a project in [Google Cloud Console](https://console.cloud.google.com/). Enable **Gmail API** in APIs & Services → Library.
 2. Configure **Google Auth Platform** branding, audience and contact details. For a personal Gmail account choose External. While in Testing, add your Gmail address as a test user.
 3. Create an OAuth client with application type **Web application**. Add the exact authorized redirect URI `http://localhost:3000/api/gmail/callback`. No JavaScript origin is required for this server-side flow.
-4. Put the client ID and secret in `GOOGLE_CLIENT_ID` and `GOOGLE_CLIENT_SECRET`. Set `GOOGLE_REDIRECT_URI` to that same exact URI.
+4. Put the client ID and secret in `EMAIL_SEQUENCER_GOOGLE_CLIENT_ID` and `EMAIL_SEQUENCER_GOOGLE_CLIENT_SECRET`. Set `EMAIL_SEQUENCER_GOOGLE_REDIRECT_URI` to that same exact URI.
 5. Click **Connect Gmail** in the dashboard and grant access. The app requests `gmail.send`, plus `openid` and `email` to identify the connected mailbox. It does not request inbox read access.
 6. `GMAIL_TOKEN_FILE` controls where the refresh token is stored: `.data/gmail-token.json` locally. The file is atomically written with mode `600`, outside the public directory. The browser never receives tokens. Keep the parent directory private; never commit or serve this file.
 
@@ -45,9 +45,9 @@ Every required variable is in `.env.example`:
 | ---------------------- | --------------------------------------------------- |
 | `AIRTABLE_API_TOKEN`   | Personal access token with record read/write access |
 | `AIRTABLE_BASE_ID`     | `apphI2f8iKVYaDRbg`                                 |
-| `GOOGLE_CLIENT_ID`     | Web OAuth client ID                                 |
-| `GOOGLE_CLIENT_SECRET` | Web OAuth client secret                             |
-| `GOOGLE_REDIRECT_URI`  | Exact callback URL, HTTPS in production             |
+| `EMAIL_SEQUENCER_GOOGLE_CLIENT_ID`     | Web OAuth client ID                                 |
+| `EMAIL_SEQUENCER_GOOGLE_CLIENT_SECRET` | Web OAuth client secret                             |
+| `EMAIL_SEQUENCER_GOOGLE_REDIRECT_URI`  | Exact callback URL, HTTPS in production             |
 | `GMAIL_TOKEN_FILE`     | Private writable file path on persistent storage    |
 | `APP_PASSWORD`         | Strong operator password, at least 16 characters    |
 
