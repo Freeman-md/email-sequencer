@@ -1,0 +1,14 @@
+node_modules/
+.next/
+.data/
+.env*
+!.env.example
+*.pem
+*.key
+*token*.json
+coverage/
+test-results/
+playwright-report/
+*.tsbuildinfo
+.DS_Store
+output/

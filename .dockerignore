@@ -1,0 +1,13 @@
+node_modules
+.next
+.git
+.data
+.env*
+!.env.example
+*.pem
+*.key
+*token*.json
+*.tsbuildinfo
+test-results
+playwright-report
+output

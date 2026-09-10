@@ -1,0 +1,41 @@
+{
+  "name": "email-sequencer",
+  "version": "1.0.0",
+  "private": true,
+  "scripts": {
+    "dev": "next dev",
+    "build": "next build && node scripts/prepare-standalone.mjs",
+    "start": "node scripts/start.mjs",
+    "lint": "eslint .",
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run",
+    "format": "prettier --write .",
+    "format:check": "prettier --check .",
+    "test:ui": "playwright test"
+  },
+  "engines": {
+    "node": ">=22.17.0"
+  },
+  "dependencies": {
+    "@fontsource-variable/inter": "^5.3.0",
+    "google-auth-library": "^11.0.2",
+    "next": "^16.3.4",
+    "nodemailer": "^10.0.1",
+    "react": "^19.2.8",
+    "react-dom": "^19.2.8",
+    "server-only": "^0.0.1",
+    "zod": "^4.5.4"
+  },
+  "devDependencies": {
+    "@playwright/test": "^1.63.0",
+    "@types/node": "^26.5.0",
+    "@types/nodemailer": "^8.0.1",
+    "@types/react": "^19.2.18",
+    "@types/react-dom": "^19.2.7",
+    "eslint": "^9.39.5",
+    "eslint-config-next": "^16.3.4",
+    "prettier": "^3.9.6",
+    "typescript": "^6.0.3",
+    "vitest": "^5.0.0"
+  }
+}
