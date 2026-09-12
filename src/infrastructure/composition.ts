@@ -7,6 +7,7 @@ import { getConfig } from './config/env';
 import { GmailClient } from './gmail/client';
 import { GmailService } from './gmail/service';
 import { FileTokenStore } from './gmail/token-store';
+import { OpenAIClient } from './openai/client';
 
 function composeInfrastructure() {
   const config = getConfig();
@@ -26,7 +27,12 @@ function composeInfrastructure() {
     new FileTokenStore(config.GMAIL_TOKEN_FILE),
   );
 
-  return { airtable, gmail };
+  const textGenerator = new OpenAIClient({
+    apiKey: config.EMAIL_SEQUENCER_OPENAI_API_KEY ?? '',
+    model: config.EMAIL_SEQUENCER_OPENAI_MODEL ?? '',
+  });
+
+  return { airtable, gmail, textGenerator };
 }
 
 // Preserve pending OAuth callbacks across development module reloads.

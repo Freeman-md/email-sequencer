@@ -1,4 +1,5 @@
 import type { SendResult } from '../../email/types/send-result';
+import type { GmailThread } from '../schemas';
 import type { OAuth2Client } from 'google-auth-library';
 
 export interface OAuthClientFactory {
@@ -12,5 +13,6 @@ export interface IGmailClient {
     verifier: string,
   ): Promise<{ email: string; refreshToken?: string }>;
   accessToken(refreshToken: string): Promise<string>;
-  send(raw: string, token: string): Promise<SendResult>;
+  thread(id: string, token: string): Promise<GmailThread>;
+  send(raw: string, token: string, threadId?: string): Promise<SendResult>;
 }

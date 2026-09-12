@@ -1,8 +1,8 @@
 import 'server-only';
 
+import { AIRTABLE } from '@/infrastructure/airtable/constants';
 import { recordsSchema, recordSchema } from '@/infrastructure/airtable/schemas';
 
-import { AIRTABLE } from '../../constants/airtable';
 import {
   mapInteraction,
   mapInteractionCompletion,
@@ -10,6 +10,7 @@ import {
 
 import type { IInteractionsRepository } from '../interfaces/interactions-repository.interface';
 import type { IAirtableClient } from '@/infrastructure/airtable/interfaces/client.interface';
+import type { SendResult } from '@/infrastructure/email/types/send-result';
 
 const field = AIRTABLE.interaction;
 const literal = (value: string) =>
@@ -56,7 +57,11 @@ export class InteractionsRepository implements IInteractionsRepository {
     return record ? mapInteraction(record) : null;
   }
 
-  async complete(id: string, sentAt: string) {
+  async complete(
+    id: string,
+    confirmation: Extract<SendResult, { kind: 'confirmed' }>,
+  ) {
+    const { sentAt, gmailMessageId, gmailThreadId } = confirmation;
     const result = mapInteractionCompletion(
       recordSchema.parse(
         await this.client.request(
@@ -64,7 +69,12 @@ export class InteractionsRepository implements IInteractionsRepository {
           {
             method: 'PATCH',
             body: JSON.stringify({
-              fields: { [field.status]: 'Completed', [field.sentAt]: sentAt },
+              fields: {
+                [field.status]: 'Completed',
+                [field.sentAt]: sentAt,
+                [field.gmailMessageId]: gmailMessageId,
+                [field.gmailThreadId]: gmailThreadId,
+              },
             }),
           },
         ),
@@ -74,10 +84,12 @@ export class InteractionsRepository implements IInteractionsRepository {
     if (
       result.id !== id ||
       result.status !== 'Completed' ||
+      result.gmailMessageId !== gmailMessageId ||
+      result.gmailThreadId !== gmailThreadId ||
       Date.parse(result.sentAt) !== Date.parse(sentAt)
     ) {
       throw new Error(
-        'Airtable did not confirm the Completed status and Sent At update.',
+        'Airtable did not confirm the Completed status, Sent At and Gmail IDs update.',
       );
     }
   }

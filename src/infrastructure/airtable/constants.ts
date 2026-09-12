@@ -1,8 +1,12 @@
 // Verified against Cold Outreach Pipeline. Field names are the documented V1 contract.
 export const AIRTABLE = {
+  campaigns: 'tblN5pAOMYychpKBK',
   interactions: 'tblqbyXiQs2ZAHTrH',
   prospects: 'tblVwsTybmO6xNsmY',
   interaction: {
+    type: 'Type',
+    gmailMessageId: 'Gmail Message ID',
+    gmailThreadId: 'Gmail Thread ID',
     status: 'Status',
     direction: 'Direction',
     channel: 'Channel',

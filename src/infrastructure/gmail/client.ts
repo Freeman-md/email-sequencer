@@ -2,7 +2,7 @@ import 'server-only';
 
 import { CodeChallengeMethod } from 'google-auth-library';
 
-import { errorSchema, sentMessageSchema } from './schemas';
+import { errorSchema, sentMessageSchema, threadSchema } from './schemas';
 
 import type {
   IGmailClient,
@@ -11,6 +11,9 @@ import type {
 import type { SendResult } from '../email/types/send-result';
 
 export const GMAIL_SEND_SCOPE = 'https://www.googleapis.com/auth/gmail.send';
+
+export const GMAIL_METADATA_SCOPE =
+  'https://www.googleapis.com/auth/gmail.metadata';
 
 export class GmailClient implements IGmailClient {
   constructor(
@@ -29,7 +32,7 @@ export class GmailClient implements IGmailClient {
       url: client.generateAuthUrl({
         access_type: 'offline',
         prompt: 'consent',
-        scope: [GMAIL_SEND_SCOPE, 'openid', 'email'],
+        scope: [GMAIL_SEND_SCOPE, GMAIL_METADATA_SCOPE, 'openid', 'email'],
         state,
         code_challenge: codes.codeChallenge,
         code_challenge_method: CodeChallengeMethod.S256,
@@ -43,7 +46,9 @@ export class GmailClient implements IGmailClient {
 
     if (
       !tokens.id_token ||
-      !tokens.scope?.split(' ').includes(GMAIL_SEND_SCOPE)
+      ![GMAIL_SEND_SCOPE, GMAIL_METADATA_SCOPE].every((scope) =>
+        tokens.scope?.split(' ').includes(scope),
+      )
     ) {
       throw new Error('Missing permissions');
     }
@@ -73,7 +78,41 @@ export class GmailClient implements IGmailClient {
     return result.token;
   }
 
-  async send(raw: string, token: string): Promise<SendResult> {
+  async thread(id: string, token: string) {
+    try {
+      const query = new URLSearchParams({ format: 'metadata' });
+      for (const name of ['Message-ID', 'References', 'Subject', 'From', 'To'])
+        query.append('metadataHeaders', name);
+      const response = await this.fetchRequest(
+        `https://gmail.googleapis.com/gmail/v1/users/me/threads/${encodeURIComponent(id)}?${query}`,
+        {
+          headers: { Authorization: `Bearer ${token}` },
+          signal: AbortSignal.timeout(20_000),
+          cache: 'no-store',
+          redirect: 'error',
+        },
+      );
+      if (!response.ok) throw new Error('Thread unavailable');
+      const thread = threadSchema.parse(await response.json());
+      if (
+        thread.id !== id ||
+        thread.messages.some((message) => message.threadId !== id)
+      )
+        throw new Error('Thread mismatch');
+
+      return thread;
+    } catch {
+      throw new Error(
+        'Email was not submitted. Cannot verify the Gmail thread. Check its ID and reconnect Gmail with metadata permission.',
+      );
+    }
+  }
+
+  async send(
+    raw: string,
+    token: string,
+    threadId?: string,
+  ): Promise<SendResult> {
     // Use fetch directly: automatic auth-client retries can duplicate a send.
     try {
       const response = await this.fetchRequest(
@@ -84,7 +123,7 @@ export class GmailClient implements IGmailClient {
             Authorization: `Bearer ${token}`,
             'Content-Type': 'application/json',
           },
-          body: JSON.stringify({ raw }),
+          body: JSON.stringify({ raw, ...(threadId ? { threadId } : {}) }),
           signal: AbortSignal.timeout(30_000),
           redirect: 'error',
         },
@@ -101,7 +140,8 @@ export class GmailClient implements IGmailClient {
           message: `Gmail returned HTTP ${response.status}. Check Sent mail before another run.`,
         };
       const data: unknown = await response.json();
-      if (!sentMessageSchema.safeParse(data).success) {
+      const parsed = sentMessageSchema.safeParse(data);
+      if (!parsed.success) {
         return {
           kind: 'uncertain',
           message:
@@ -109,7 +149,12 @@ export class GmailClient implements IGmailClient {
         };
       }
 
-      return { kind: 'confirmed', sentAt: this.now().toISOString() };
+      return {
+        kind: 'confirmed',
+        sentAt: this.now().toISOString(),
+        gmailMessageId: parsed.data.id,
+        gmailThreadId: parsed.data.threadId,
+      };
     } catch {
       return {
         kind: 'uncertain',

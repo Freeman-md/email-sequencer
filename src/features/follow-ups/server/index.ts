@@ -1,0 +1,1 @@
+export { getFollowUpsService } from './composition';

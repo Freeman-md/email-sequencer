@@ -1,6 +1,13 @@
 import { test, expect } from '@playwright/test';
+import { initialPreparationState } from '../../src/features/follow-ups/types/preparation';
 import { initialRunState } from '../../src/features/sequencer/constants/run';
 import type { DashboardState } from '../../src/features/sequencer/types';
+
+test.beforeEach(async ({ page }) => {
+  await page.route('**/api/follow-ups/**', (route) =>
+    route.fulfill({ json: initialPreparationState() }),
+  );
+});
 
 const current = {
   id: 'recTest',
@@ -257,4 +264,72 @@ test('review acknowledgement does not carry over to a later failed run', async (
   state.run = { ...state.run, runStartedAt: '2026-09-09T13:00:00Z' };
   await expect(checkbox).not.toBeChecked();
   await expect(start).toBeDisabled();
+});
+
+test('prepares drafts, protects command results from stale polling and displays skip reasons on mobile', async ({
+  page,
+}) => {
+  let state = initialPreparationState();
+  let polls = 0;
+  let release!: () => Promise<void>;
+  let held!: () => void;
+  const pending = new Promise<void>((resolve) => {
+    held = resolve;
+  });
+  let mutations = 0;
+  await page.route('**/api/sequencer/**', (route) =>
+    route.fulfill({ json: fixture() }),
+  );
+  await page.route('**/api/follow-ups/**', async (route) => {
+    if (route.request().method() === 'POST') {
+      mutations++;
+      expect(route.request().url()).toContain('/prepare');
+      state = {
+        ...state,
+        status: 'running',
+        startedAt: '2026-09-12T12:00:00Z',
+      };
+      await route.fulfill({ json: state, status: 202 });
+    } else {
+      polls++;
+      if (polls === 2) {
+        release = () => route.fulfill({ json: initialPreparationState() });
+        held();
+      } else await route.fulfill({ json: state });
+    }
+  });
+  await page.goto('/');
+  await pending;
+  await page.getByRole('button', { name: 'Prepare Follow-Ups' }).click();
+  await expect(page.getByRole('button', { name: 'Preparing…' })).toBeDisabled();
+  await release();
+  await expect(page.getByRole('button', { name: 'Preparing…' })).toBeDisabled();
+  state = {
+    ...state,
+    status: 'completed',
+    checked: 3,
+    eligible: 1,
+    drafted: 1,
+    skipped: 2,
+    reasons: { 'Reply already received': 1, 'Missing Gmail Thread ID': 1 },
+  };
+  await expect(
+    page.getByText(/Preparation complete · Checked: 3/),
+  ).toBeVisible();
+  await page.getByText('Skip reasons', { exact: true }).click();
+  await expect(page.getByText('Missing Gmail Thread ID: 1')).toBeVisible();
+  expect(mutations).toBe(1);
+  await page.setViewportSize({ width: 390, height: 1000 });
+  await page
+    .getByRole('heading', { name: 'Follow-Ups', exact: true })
+    .scrollIntoViewIfNeeded();
+  await page.screenshot({
+    path: 'output/playwright/follow-ups-mobile.png',
+    fullPage: true,
+  });
+  expect(
+    await page.evaluate(
+      () => document.documentElement.scrollWidth <= window.innerWidth,
+    ),
+  ).toBe(true);
 });

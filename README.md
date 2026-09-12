@@ -19,12 +19,12 @@ Open http://localhost:3000. The browser asks for HTTP Basic authentication: user
 
 Create a [personal access token](https://airtable.com/create/tokens) with `data.records:read` and `data.records:write`, limited to **Cold Outreach Pipeline**. Put it in `AIRTABLE_API_TOKEN`. `AIRTABLE_BASE_ID` is `apphI2f8iKVYaDRbg`.
 
-The existing schema is used unchanged:
+Use the existing tables, adding the Gmail ID and received-time fields below:
 
-- Interactions (`tblqbyXiQs2ZAHTrH`): `Status`, `Direction`, `Channel`, `Subject`, `Message`, `Prospect`, `Created At`, `Sent At`.
+- Interactions (`tblqbyXiQs2ZAHTrH`): `Status`, `Direction`, `Channel`, `Subject`, `Message`, `Prospect`, `Created At`, `Sent At`, `Type`, `Gmail Message ID`, `Gmail Thread ID`, `Received At`.
 - Prospects (`tblVwsTybmO6xNsmY`): `Full Name`, `Company`, `Email`.
 
-Table IDs and field mappings are centralized in `src/features/sequencer/constants/airtable.ts`. No schema-write scope is needed. Connection checks read zero records and validate access to both tables. Write access is verified when an actual confirmed send is saved, not by modifying real data during connection checks.
+Table IDs and field mappings are centralized in `src/infrastructure/airtable/constants.ts`. No schema-write scope is needed. Connection checks read zero records and validate access to both tables. Write access is verified when an actual confirmed send is saved, not by modifying real data during connection checks.
 
 ### Google OAuth
 
@@ -32,7 +32,7 @@ Table IDs and field mappings are centralized in `src/features/sequencer/constant
 2. Configure **Google Auth Platform** branding, audience and contact details. For a personal Gmail account choose External. While in Testing, add your Gmail address as a test user.
 3. Create an OAuth client with application type **Web application**. Add the exact authorized redirect URI `http://localhost:3000/api/gmail/callback`. No JavaScript origin is required for this server-side flow.
 4. Put the client ID and secret in `EMAIL_SEQUENCER_GOOGLE_CLIENT_ID` and `EMAIL_SEQUENCER_GOOGLE_CLIENT_SECRET`. Set `EMAIL_SEQUENCER_GOOGLE_REDIRECT_URI` to that same exact URI.
-5. Click **Connect Gmail** in the dashboard and grant access. The app requests `gmail.send`, plus `openid` and `email` to identify the connected mailbox. It does not request inbox read access.
+5. Click **Connect Gmail** in the dashboard and grant access. The app requests `gmail.send` and `gmail.metadata`, plus `openid` and `email` to identify the connected mailbox. Metadata permission retrieves thread headers for replies; it does not read message bodies. Reconnect existing Gmail authorizations after this update.
 6. `GMAIL_TOKEN_FILE` controls where the refresh token is stored: `.data/gmail-token.json` locally. The file is atomically written with mode `600`, outside the public directory. The browser never receives tokens. Keep the parent directory private; never commit or serve this file.
 
 Google External apps in Testing normally receive refresh tokens that expire after seven days when using Gmail scopes. For ongoing use, move the consent configuration to Production and satisfy any Google verification requirements that apply to your audience. See [Google's OAuth web server guide](https://developers.google.com/identity/protocols/oauth2/web-server) and [Gmail scopes](https://developers.google.com/workspace/gmail/api/auth/scopes). Reconnect through the dashboard when authorization is revoked or expires.
@@ -41,15 +41,17 @@ Google External apps in Testing normally receive refresh tokens that expire afte
 
 Every required variable is in `.env.example`:
 
-| Variable                               | Value                                               |
-| -------------------------------------- | --------------------------------------------------- |
-| `AIRTABLE_API_TOKEN`                   | Personal access token with record read/write access |
-| `AIRTABLE_BASE_ID`                     | `apphI2f8iKVYaDRbg`                                 |
-| `EMAIL_SEQUENCER_GOOGLE_CLIENT_ID`     | Web OAuth client ID                                 |
-| `EMAIL_SEQUENCER_GOOGLE_CLIENT_SECRET` | Web OAuth client secret                             |
-| `EMAIL_SEQUENCER_GOOGLE_REDIRECT_URI`  | Exact callback URL, HTTPS in production             |
-| `GMAIL_TOKEN_FILE`                     | Private writable file path on persistent storage    |
-| `APP_PASSWORD`                         | Strong operator password, at least 16 characters    |
+| Variable                               | Value                                                  |
+| -------------------------------------- | ------------------------------------------------------ |
+| `AIRTABLE_API_TOKEN`                   | Personal access token with record read/write access    |
+| `AIRTABLE_BASE_ID`                     | `apphI2f8iKVYaDRbg`                                    |
+| `EMAIL_SEQUENCER_GOOGLE_CLIENT_ID`     | Web OAuth client ID                                    |
+| `EMAIL_SEQUENCER_GOOGLE_CLIENT_SECRET` | Web OAuth client secret                                |
+| `EMAIL_SEQUENCER_GOOGLE_REDIRECT_URI`  | Exact callback URL, HTTPS in production                |
+| `GMAIL_TOKEN_FILE`                     | Private writable file path on persistent storage       |
+| `EMAIL_SEQUENCER_OPENAI_API_KEY`       | OpenAI API key; needed only for follow-up generation   |
+| `EMAIL_SEQUENCER_OPENAI_MODEL`         | Explicit Responses API text model ID; no default model |
+| `APP_PASSWORD`                         | Strong operator password, at least 16 characters       |
 
 Configuration is validated at the server boundary. Missing configuration produces named setup errors without printing values. Build does not require credentials. Never use `NEXT_PUBLIC_*` for these variables.
 
@@ -57,11 +59,38 @@ Configuration is validated at the server boundary. Missing configuration produce
 
 At Start, `runStartedAt` is captured once. Each query requests at most one Draft with Direction Outbound, Channel Email, nonblank Subject and Message, a Prospect relationship and `Created At <= runStartedAt`, sorted oldest first. Its linked Prospect is fetched to read Email. Candidates without Email are skipped one at a time; ambiguous multiple-Prospect links stop the run for correction. No queue is preloaded.
 
-After Gmail confirms success, the app saves `Status = Completed` and `Sent At` in one Airtable update, waits the configured interval, then queries again. `Sent At` is the server timestamp when the Gmail success response is confirmed; Gmail's send response does not expose a separate delivery timestamp. It is not the time the run began. The final interval also elapses before the empty query completes the run.
+After Gmail confirms success, the app saves `Status = Completed`, `Sent At`, `Gmail Message ID` and `Gmail Thread ID` in one Airtable update, waits the configured interval, then queries again. `Sent At` is the server timestamp when the Gmail success response is confirmed; Gmail's send response does not expose a separate delivery timestamp. It is not the time the run began. The final interval also elapses before the empty query completes the run.
 
-A definite Gmail rejection leaves the Draft untouched, displays the error and skips that record for the rest of the run. The same interval is respected after failed attempts. An uncertain outcome stops immediately without retrying. If Gmail succeeds but Airtable cannot confirm the update, the app also stops and displays the record ID and confirmed send time for manual reconciliation. Check Gmail and fix Airtable before starting another run. The UI requires acknowledgement for these cases; it does not verify your manual reconciliation or automatically resend.
+A definite Gmail rejection leaves the Draft untouched, displays the error and skips that record for the rest of the run. The same interval is respected after failed attempts. An uncertain outcome stops immediately without retrying. If Gmail succeeds but Airtable cannot confirm the update, the app also stops and displays the record ID, confirmed send time and both returned Gmail IDs for manual reconciliation. Check Gmail and fix Airtable before starting another run. The UI requires acknowledgement for these cases; it does not verify your manual reconciliation or automatically resend.
 
 Stop cancels a pending wait. An in-flight send is allowed to finish and its result is saved before the run lock is released. Closing the browser does not stop the runner. Polling runs about every two seconds; connections are checked at run start and cached for up to 60 seconds while observing. Errors retain the latest 20 details plus the total failure count. Current Interaction and Last Sent are session state, not a separate durable history. Dates are displayed in Europe/London.
+
+## Prepare Follow-Ups
+
+The dashboard's **Prepare Follow-Ups** button creates Airtable Drafts only. Review those records, then start the existing sequencer separately. Preparation runs in the same persistent Node process, returns immediately and reports progress through polling. Closing the browser does not cancel preparation. Only one preparation can run at a time.
+
+### Setup and data contract
+
+- On Interactions, create **Gmail Message ID** and **Gmail Thread ID** as single-line text fields. Exact spelling matters. Leave historical IDs empty until your separate migration fills them; this feature never searches for or backfills historical messages.
+- Create **Received At** as a date field with time for inbound interactions. Populate it with the actual occurrence time from the inbound source, including backfills. `Created At` is never used as a substitute. Any Completed inbound interaction without a valid received timestamp blocks that prospect. Missing the field itself causes a safe context-read error.
+- Keep inbound Interactions populated and linked to their Prospect. This feature does not synchronize the inbox; an absent reply record cannot be inferred by Airtable eligibility. At sending time, Gmail metadata also prevents submission if the latest thread message is a reply from another sender.
+- Follow-ups use the Prospect's `Campaign` and reciprocal `Interactions` links, `Role`, `Do Not Contact`, `Signal`, `Sources` and `Qualification Notes`, alongside name/company/email. Do Not Contact blocks preparation.
+- Campaigns (`tblN5pAOMYychpKBK`) supply `Campaign Name`, `ICP`, `Buyer Roles`, `Geography`, `Company Criteria`, `Exclusion Criteria`, `Core Problem`, `Triggers`, `Offer`, `Desired Next Step` and `Notes`. Put campaign-specific messaging/follow-up guidance in Notes. Missing or ambiguous campaign links, or missing name/offer, block generation.
+- Configure `EMAIL_SEQUENCER_OPENAI_API_KEY` and `EMAIL_SEQUENCER_OPENAI_MODEL`, then restart the server. These are optional for ordinary sending; there is no fallback to global `OPENAI_*` variables. Generation uses one bounded OpenAI Responses request per eligible prospect, existing context only, no research/tools and no automatic retries.
+
+### Eligibility and persistence
+
+Steps live in `src/features/follow-ups/constants/steps.ts`: initially 3, 4 and 5 elapsed days, each measured from the latest relevant completed outbound's `Sent At`. Add consecutive step definitions to extend the sequence. A single completed Initial Message anchors the sequence; completed Follow-ups determine the next number. Multiple initial conversations for the same Prospect are skipped for manual review rather than guessing which sequence to continue. Conflicting threads, ambiguous timestamps, missing original context or missing Gmail identifiers are skipped. An inbound reply since the original ends that cold sequence, even if a later outbound was logged. Any outstanding Follow-up Draft for the prospect blocks another Draft. Deleting an unsent Draft deliberately allows preparation again.
+
+Candidates are read in pages of 25 Prospects with linked history. Interaction reads use batches of up to 50 linked record IDs, not a full-table scan. Preparation rereads the Prospect and its history after generation; changed context, new replies and new Drafts prevent the write. The shared Airtable client spaces requests across both features. The run shows checked/eligible/drafted/skipped counts, grouped skip reasons, and the latest 20 errors with a total error count. Eligible counts include prospects whose generation or save subsequently failed.
+
+Created records are Outbound / Email / Follow-up / Draft, preserving the original subject and Gmail Thread ID. The new Gmail Message ID and Sent At remain blank, and Airtable supplies Created At. An unconfirmed create is never retried; inspect that Prospect's Interactions before rerunning. Single-process locking and Draft checks prevent normal duplicate runs; Airtable provides no transaction across the final read and write, so independent external automation must not concurrently prepare the same prospects.
+
+The sequencer retrieves Gmail metadata, validates the conversation's recipient/subject and RFC Message-ID, and supplies `threadId`, `In-Reply-To` and `References` when sending a reply. Encoded subjects are decoded with `libmime`. Missing or unverifiable threading fails before submission instead of sending a standalone follow-up. See [Gmail's threading requirements](https://developers.google.com/workspace/gmail/api/guides/threads) and [metadata access](https://developers.google.com/workspace/gmail/api/reference/rest/v1/users.threads/get).
+
+Preparation is isolated under `src/features/follow-ups`: components render, the hook owns commands/polling, the API client owns browser transport, repositories own each entity's persistence, mappers translate records, and the service applies deterministic policy and coordinates generation. The OpenAI client remains in infrastructure and receives feature-owned prompts through a text-generation interface. It has no sending capability.
+
+For a manual test, use your own address and a Draft Initial Message. Send it through the sequencer and verify both Gmail IDs and Sent At in Airtable. Once its configured delay has elapsed, prepare a follow-up, inspect the Draft, then send it and check the original Gmail thread. To exercise this sooner in isolated test data, adjust the synthetic record's Sent At deliberately; do not alter production history. Verify a second preparation creates no duplicate and a logged inbound reply suppresses the next step.
 
 ## Production: one persistent Node instance
 
@@ -88,7 +117,7 @@ docker run --name email-sequencer --restart unless-stopped \
   -v email-sequencer-data:/data email-sequencer
 ```
 
-Stop a run and wait for it to stop before deployments or shutdown. A process restart resets in-memory run state. A crash between Gmail acceptance and the Airtable update can leave a sent email as Draft: **inspect Gmail and reconcile that record before another run**. Exactly-once delivery across crashes is not guaranteed by this database-free V1. Tokens survive restarts only if their volume persists.
+Stop the sender and let any active preparation finish before deployments or shutdown. A process restart resets in-memory run state. A crash between Gmail acceptance and the Airtable update can leave a sent email as Draft: **inspect Gmail and reconcile that record before another run**. Exactly-once delivery across crashes is not guaranteed by this database-free V1. Tokens survive restarts only if their volume persists.
 
 ## Server structure
 
@@ -123,6 +152,7 @@ Polling responses and failures from before a command cannot overwrite its result
 - `gmail/service.ts`: OAuth state and PKCE coordination, token persistence coordination, connection checks and MIME preparation.
 - `gmail/token-store.ts`: private token-file reads and atomic writes. Tests use a mocked filesystem.
 - `email/`: provider-independent sender interface and message/result types.
+- `openai/client.ts`: bounded Responses API text generation; `text-generation/` owns its provider-independent interface.
 - `config/` and `http/`: environment validation and request/response helpers, respectively.
 
 Schemas validate external data and supply inferred types where appropriate. Ordinary internal data shapes remain TypeScript types. Infrastructure classes receive dependencies through constructors; helpers stay within their owning module.
@@ -137,6 +167,6 @@ npm test
 npm run build
 ```
 
-For browser verification, run `npx playwright install chromium` once, then `npm run test:ui` after a build. Browser tests intercept every sequencer request and use synthetic data. Screenshots are saved under the ignored `output/playwright/` directory.
+For browser verification, run `npx playwright install chromium` once, then `npm run test:ui` after a build. Browser tests intercept sequencer and follow-up requests and use synthetic data. Run builds/startup for verification in an isolated source copy without local environment or token files; browser interception does not protect server-side rendering from live services. Screenshots are saved under the ignored `output/playwright/` directory.
 
 Tests use fake Airtable and Gmail responses and never send real emails. No live Draft queue should be run for verification. The specification is [Final V1 Specification](https://app.notion.com/p/3d6b505dc852817b86d9f1c7fa54f4ee), structure is [Web Structure](https://app.notion.com/p/3d6b505dc852814a8bd2dac10149442c), and visual reference is [Paper](https://app.paper.design/file/01M23G0TF90V757KYHN9CXF6C7/1-0). While waiting, the UI shows the last processed Interaction rather than prefetching the next one; Notion's wait-then-fetch behaviour takes precedence over Paper's sample “next email” label.

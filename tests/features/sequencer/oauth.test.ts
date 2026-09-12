@@ -1,7 +1,11 @@
 import { LoginTicket, OAuth2Client } from 'google-auth-library';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
-import { GmailClient, GMAIL_SEND_SCOPE } from '@/infrastructure/gmail/client';
+import {
+  GmailClient,
+  GMAIL_SEND_SCOPE,
+  GMAIL_METADATA_SCOPE,
+} from '@/infrastructure/gmail/client';
 import { GmailService } from '@/infrastructure/gmail/service';
 
 function setup() {
@@ -24,12 +28,13 @@ function setup() {
 afterEach(() => vi.restoreAllMocks());
 
 describe('Gmail OAuth', () => {
-  it('requests only send and identity scopes with offline access, state and PKCE', async () => {
+  it('requests send, metadata and identity scopes with offline access, state and PKCE', async () => {
     const { service } = setup();
     const { url, state } = await service.beginAuthorization();
     const params = new URL(url).searchParams;
     expect(params.get('scope')?.split(' ')).toEqual([
       GMAIL_SEND_SCOPE,
+      GMAIL_METADATA_SCOPE,
       'openid',
       'email',
     ]);
@@ -66,7 +71,7 @@ describe('Gmail OAuth', () => {
           refresh_token: 'fake-refresh',
           access_token: 'fake-access',
           id_token: 'fake-identity',
-          scope: GMAIL_SEND_SCOPE,
+          scope: `${GMAIL_SEND_SCOPE} ${GMAIL_METADATA_SCOPE}`,
         },
         res: null,
       }));
@@ -116,6 +121,7 @@ describe('Gmail OAuth', () => {
       exchange: vi.fn().mockResolvedValue({ email: 'operator@example.com' }),
       accessToken: vi.fn(),
       send: vi.fn(),
+      thread: vi.fn(),
     };
     const service = new GmailService(client, tokens);
     const first = await service.beginAuthorization();

@@ -1,6 +1,5 @@
-import { AIRTABLE } from '../../constants/airtable';
-
-import { textField } from './record-fields';
+import { AIRTABLE } from '@/infrastructure/airtable/constants';
+import { textField } from '@/infrastructure/airtable/record-fields';
 
 import type { InteractionRecord } from '../types';
 import type { AirtableRecord } from '@/infrastructure/airtable/schemas';
@@ -20,6 +19,9 @@ export function mapInteraction(record: AirtableRecord): InteractionRecord {
 
   return {
     id: record.id,
+    type: textField(record, field.type),
+    gmailThreadId: textField(record, field.gmailThreadId),
+    gmailMessageId: textField(record, field.gmailMessageId),
     status: textField(record, field.status),
     direction: textField(record, field.direction),
     channel: textField(record, field.channel),
@@ -35,5 +37,7 @@ export function mapInteractionCompletion(record: AirtableRecord) {
     id: record.id,
     status: textField(record, AIRTABLE.interaction.status),
     sentAt: textField(record, AIRTABLE.interaction.sentAt),
+    gmailMessageId: textField(record, AIRTABLE.interaction.gmailMessageId),
+    gmailThreadId: textField(record, AIRTABLE.interaction.gmailThreadId),
   };
 }

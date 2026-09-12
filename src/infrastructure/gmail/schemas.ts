@@ -15,4 +15,25 @@ export const errorSchema = z.object({
   }),
 });
 
-export const sentMessageSchema = z.object({ id: z.string().min(1) });
+export const sentMessageSchema = z.object({
+  id: z.string().min(1),
+  threadId: z.string().min(1),
+});
+
+export const threadSchema = z.object({
+  id: z.string().min(1),
+  messages: z
+    .array(
+      z.object({
+        id: z.string().min(1),
+        threadId: z.string().min(1),
+        internalDate: z.string().regex(/^\d+$/),
+        labelIds: z.array(z.string()).default([]),
+        payload: z.object({
+          headers: z.array(z.object({ name: z.string(), value: z.string() })),
+        }),
+      }),
+    )
+    .min(1),
+});
+export type GmailThread = z.infer<typeof threadSchema>;

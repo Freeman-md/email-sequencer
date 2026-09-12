@@ -706,3 +706,43 @@ h1 {
     text-align: right;
   }
 }
+
+.follow-ups {
+  border-top: 1px solid var(--color-border);
+  padding-top: 24px;
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  font-size: 14px;
+  line-height: 22px;
+}
+.follow-ups-heading {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 24px;
+}
+.follow-ups h2 {
+  font-size: 22px;
+  line-height: 30px;
+}
+.follow-ups-heading p {
+  color: var(--color-muted);
+  margin-top: 6px;
+  max-width: 600px;
+}
+.follow-ups .primary {
+  margin: 0;
+  width: auto;
+  flex-shrink: 0;
+}
+.follow-ups summary {
+  cursor: pointer;
+}
+@media (max-width: 639px) {
+  .follow-ups-heading {
+    align-items: stretch;
+    flex-direction: column;
+    gap: 16px;
+  }
+}

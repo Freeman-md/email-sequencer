@@ -1,8 +1,8 @@
 import 'server-only';
 
+import { AIRTABLE } from '@/infrastructure/airtable/constants';
 import { recordSchema, recordsSchema } from '@/infrastructure/airtable/schemas';
 
-import { AIRTABLE } from '../../constants/airtable';
 import { mapProspect } from '../mappers/prospect.mapper';
 
 import type { IProspectsRepository } from '../interfaces/prospects-repository.interface';

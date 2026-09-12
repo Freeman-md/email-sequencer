@@ -1,12 +1,18 @@
 import { describe, expect, it, vi } from 'vitest';
 
-import { AIRTABLE } from '@/features/sequencer/constants/airtable';
 import {
   InteractionsRepository,
   eligibleQuery,
 } from '@/features/sequencer/server/repositories/interactions.repository';
 import { ProspectsRepository } from '@/features/sequencer/server/repositories/prospects.repository';
+import { AIRTABLE } from '@/infrastructure/airtable/constants';
 
+const confirmation = {
+  kind: 'confirmed' as const,
+  sentAt: '2026-09-09T12:00:00.000Z',
+  gmailMessageId: 'gmail-id',
+  gmailThreadId: 'thread-id',
+};
 const cutoff = '2026-09-09T12:00:00.000Z';
 const record = {
   id: 'recFirst',
@@ -84,21 +90,34 @@ describe('Airtable contract', () => {
     ).rejects.toThrow('Expected text');
   });
 
-  it('writes only Completed and actual Sent At, and requires confirmation', async () => {
+  it('writes Completed, actual Sent At and both Gmail IDs, and requires confirmation', async () => {
     const request = vi.fn().mockResolvedValue({
       id: record.id,
-      fields: { Status: 'Completed', 'Sent At': cutoff },
+      fields: {
+        Status: 'Completed',
+        'Sent At': cutoff,
+        'Gmail Message ID': 'gmail-id',
+        'Gmail Thread ID': 'thread-id',
+      },
     });
-    await new InteractionsRepository({ request }).complete(record.id, cutoff);
+    await new InteractionsRepository({ request }).complete(
+      record.id,
+      confirmation,
+    );
     expect(request.mock.calls[0]?.[1]).toEqual({
       method: 'PATCH',
       body: JSON.stringify({
-        fields: { Status: 'Completed', 'Sent At': cutoff },
+        fields: {
+          Status: 'Completed',
+          'Sent At': cutoff,
+          'Gmail Message ID': 'gmail-id',
+          'Gmail Thread ID': 'thread-id',
+        },
       }),
     });
     request.mockResolvedValue({ id: record.id, fields: { Status: 'Draft' } });
     await expect(
-      new InteractionsRepository({ request }).complete(record.id, cutoff),
+      new InteractionsRepository({ request }).complete(record.id, confirmation),
     ).rejects.toThrow('did not confirm');
   });
 });

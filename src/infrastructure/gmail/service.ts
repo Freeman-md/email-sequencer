@@ -2,6 +2,8 @@ import 'server-only';
 
 import { randomBytes } from 'node:crypto';
 
+import libmime from 'libmime';
+import addressparser from 'nodemailer/lib/addressparser';
 import MailComposer from 'nodemailer/lib/mail-composer';
 import { z } from 'zod';
 
@@ -84,7 +86,7 @@ export class GmailService implements EmailSender {
       await this.tokens.write({ refreshToken, email: identity.email });
     } catch {
       throw new Error(
-        'Gmail connection failed. Grant send permission and offline access, and check OAuth configuration and token file permissions.',
+        'Gmail connection failed. Grant send and metadata permissions and offline access, and check OAuth configuration and token file permissions.',
       );
     }
   }
@@ -125,12 +127,31 @@ export class GmailService implements EmailSender {
         };
       }
 
-      raw = await this.composeMessage(email);
       const stored = await this.tokens.read();
 
       if (!stored) throw new Error('Connect Gmail before sending.');
 
       token = await this.client.accessToken(stored.refreshToken);
+      if (email.isFollowUp && !email.gmailThreadId) {
+        return {
+          kind: 'definite',
+          message:
+            'Follow-up has no Gmail Thread ID. Draft unchanged; repair its conversation link before sending.',
+        };
+      }
+      let reply: { inReplyTo: string; references: string[] } | undefined;
+      if (email.gmailThreadId) {
+        try {
+          reply = await this.replyHeaders(email, token, stored.email);
+        } catch {
+          return {
+            kind: 'definite',
+            message:
+              'Follow-up was not submitted. Verify the Gmail thread, original subject and recipient, check for replies, and reconnect Gmail with metadata permission. Draft unchanged.',
+          };
+        }
+      }
+      raw = await this.composeMessage(email, reply);
     } catch {
       return {
         kind: 'definite',
@@ -139,11 +160,50 @@ export class GmailService implements EmailSender {
       };
     }
 
-    return this.client.send(raw, token);
+    return this.client.send(raw, token, email.gmailThreadId);
   }
 
-  private async composeMessage(email: Email) {
+  private async replyHeaders(email: Email, token: string, mailbox: string) {
+    const thread = await this.client.thread(email.gmailThreadId!, token);
+    const messages = thread.messages
+      .filter((message) => !message.labelIds.includes('DRAFT'))
+      .sort((a, b) => Number(a.internalDate) - Number(b.internalDate));
+    const latest = messages.at(-1);
+    if (!latest) throw new Error('Empty thread');
+    const header = (name: string) =>
+      latest.payload.headers.find(
+        (h) => h.name.toLowerCase() === name.toLowerCase(),
+      )?.value ?? '';
+    const addresses = (name: string) =>
+      addressparser(header(name), { flatten: true }).map((a) =>
+        a.address?.toLowerCase(),
+      );
+    const subject = (value: string) =>
+      libmime
+        .decodeWords(value)
+        .replace(/^(?:re:\s*)+/i, '')
+        .trim();
+    // Never attach a draft to another recipient or continue a thread after a reply.
+    if (
+      !addresses('From').includes(mailbox.toLowerCase()) ||
+      !addresses('To').includes(email.email.toLowerCase()) ||
+      subject(header('Subject')) !== subject(email.subject)
+    )
+      throw new Error('Conversation mismatch or reply received');
+    const inReplyTo = header('Message-ID').trim();
+    if (!/^<[^<>\s]+>$/.test(inReplyTo))
+      throw new Error('Missing RFC Message-ID');
+    const references = header('References').match(/<[^<>\s]+>/g) ?? [];
+
+    return { inReplyTo, references: [...new Set([...references, inReplyTo])] };
+  }
+
+  private async composeMessage(
+    email: Email,
+    reply?: { inReplyTo: string; references: string[] },
+  ) {
     const message = await new MailComposer({
+      ...reply,
       to: email.email,
       subject: email.subject,
       text: email.message,

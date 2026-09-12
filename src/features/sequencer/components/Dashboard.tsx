@@ -1,5 +1,7 @@
 'use client';
 
+import { FollowUps } from '@/features/follow-ups';
+
 import { DEFAULT_INTERVAL_SECONDS, initialRunState } from '../constants/run';
 import { useDashboardControls } from '../hooks/use-dashboard-controls';
 import { useSequencer } from '../hooks/use-sequencer';
@@ -64,6 +66,7 @@ export function Dashboard({
       </div>
       <LastSent sent={run.lastSent} />
       <RunNotices run={run} />
+      <FollowUps />
     </main>
   );
 }

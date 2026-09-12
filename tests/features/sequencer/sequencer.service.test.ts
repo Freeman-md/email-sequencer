@@ -14,11 +14,16 @@ const interaction: Interaction = {
   company: 'Northstar Labs',
   email: 'maya@example.com',
   subject: 'A clearer handoff',
+  gmailThreadId: undefined,
+  isFollowUp: false,
   message: 'Hello Maya,\nHere is the message.',
   createdAt: '2026-09-09T08:00:00.000Z',
 };
 const candidate: InteractionRecord = {
   id: interaction.id,
+  type: 'Initial Message',
+  gmailThreadId: '',
+  gmailMessageId: '',
   status: 'Draft',
   direction: 'Outbound',
   channel: 'Email',
@@ -35,6 +40,8 @@ function setup() {
   const complete = vi.fn().mockResolvedValue(undefined);
   const send = vi.fn<() => Promise<SendResult>>().mockResolvedValue({
     kind: 'confirmed',
+    gmailMessageId: 'gmail-id',
+    gmailThreadId: 'thread-id',
     sentAt: '2026-09-09T12:00:01.000Z',
   });
   const check = vi.fn().mockResolvedValue(undefined);
@@ -75,10 +82,12 @@ describe('one-at-a-time run lifecycle', () => {
     await flush();
     expect(next).toHaveBeenCalledTimes(1);
     expect(send).toHaveBeenCalledWith(interaction);
-    expect(complete).toHaveBeenCalledWith(
-      interaction.id,
-      '2026-09-09T12:00:01.000Z',
-    );
+    expect(complete).toHaveBeenCalledWith(interaction.id, {
+      kind: 'confirmed',
+      sentAt: '2026-09-09T12:00:01.000Z',
+      gmailMessageId: 'gmail-id',
+      gmailThreadId: 'thread-id',
+    });
     expect(runner.snapshot()).toMatchObject({
       status: 'running',
       phase: 'waiting',
@@ -108,9 +117,19 @@ describe('one-at-a-time run lifecycle', () => {
     await flush();
     expect(complete).not.toHaveBeenCalled();
     expect(runner.snapshot().phase).toBe('sending');
-    resolveSend({ kind: 'confirmed', sentAt: startedAt });
+    resolveSend({
+      kind: 'confirmed',
+      gmailMessageId: 'gmail-id',
+      gmailThreadId: 'thread-id',
+      sentAt: startedAt,
+    });
     await flush();
-    expect(complete).toHaveBeenCalledExactlyOnceWith(interaction.id, startedAt);
+    expect(complete).toHaveBeenCalledExactlyOnceWith(interaction.id, {
+      kind: 'confirmed',
+      sentAt: startedAt,
+      gmailMessageId: 'gmail-id',
+      gmailThreadId: 'thread-id',
+    });
     runner.stop();
     await flush();
   });
@@ -221,7 +240,12 @@ describe('one-at-a-time run lifecycle', () => {
     await flush();
     runner.stop();
     expect(() => runner.start(300)).toThrow('already active');
-    finish({ kind: 'confirmed', sentAt: startedAt });
+    finish({
+      kind: 'confirmed',
+      gmailMessageId: 'gmail-id',
+      gmailThreadId: 'thread-id',
+      sentAt: startedAt,
+    });
     await flush();
     expect(complete).toHaveBeenCalledTimes(1);
     expect(next).toHaveBeenCalledTimes(1);

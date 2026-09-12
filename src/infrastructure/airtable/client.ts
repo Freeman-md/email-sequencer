@@ -4,6 +4,8 @@ import type { Config } from '../config/schemas';
 import type { IAirtableClient } from './interfaces/client.interface';
 
 export class AirtableClient implements IAirtableClient {
+  private nextRequestAt = 0;
+
   constructor(
     private readonly config: Pick<
       Config,
@@ -13,6 +15,11 @@ export class AirtableClient implements IAirtableClient {
   ) {}
 
   async request(path: string, init?: RequestInit): Promise<unknown> {
+    // Reserve slots synchronously across preparation and sequencer calls. Airtable
+    // allows five requests/second per base; leave headroom without retrying writes.
+    const delay = Math.max(0, this.nextRequestAt - Date.now());
+    this.nextRequestAt = Date.now() + delay + 250;
+    if (delay) await new Promise((resolve) => setTimeout(resolve, delay));
     let response: Response;
 
     try {

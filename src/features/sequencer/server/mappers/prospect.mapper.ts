@@ -1,6 +1,5 @@
-import { AIRTABLE } from '../../constants/airtable';
-
-import { textField } from './record-fields';
+import { AIRTABLE } from '@/infrastructure/airtable/constants';
+import { textField } from '@/infrastructure/airtable/record-fields';
 
 import type { Prospect } from '../types';
 import type { AirtableRecord } from '@/infrastructure/airtable/schemas';

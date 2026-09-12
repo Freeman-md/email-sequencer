@@ -38,7 +38,9 @@ describe('Gmail outcome boundaries', () => {
   it('encodes the message and accepts a confirmed message ID without retrying', async () => {
     const send = vi
       .fn<typeof fetch>()
-      .mockResolvedValue(Response.json({ id: 'gmail-id' }));
+      .mockResolvedValue(
+        Response.json({ id: 'gmail-id', threadId: 'thread-id' }),
+      );
     const result = await createSender(
       access,
       send,
@@ -46,6 +48,8 @@ describe('Gmail outcome boundaries', () => {
     )(email);
     expect(result).toEqual({
       kind: 'confirmed',
+      gmailMessageId: 'gmail-id',
+      gmailThreadId: 'thread-id',
       sentAt: '2026-09-09T12:00:01.000Z',
     });
     const raw = JSON.parse(send.mock.calls[0]?.[1]?.body as string).raw;
@@ -149,5 +153,93 @@ describe('Gmail outcome boundaries', () => {
         expect(result.message).not.toContain('not JSON');
       }
     }
+  });
+});
+
+function threadFixture() {
+  return {
+    id: 'thread-id',
+    messages: [
+      {
+        id: 'parent-gmail-id',
+        threadId: 'thread-id',
+        internalDate: '1788254400000',
+        labelIds: ['SENT'],
+        payload: {
+          headers: [
+            { name: 'From', value: 'Operator <operator@example.com>' },
+            { name: 'To', value: 'Maya <maya@example.com>' },
+            { name: 'Subject', value: '=?UTF-8?Q?Hello_=E2=9C=93?=' },
+            { name: 'Message-ID', value: '<parent@example.com>' },
+            { name: 'References', value: '<original@example.com>' },
+          ],
+        },
+      },
+    ],
+  };
+}
+
+describe('threaded Gmail sending', () => {
+  it('uses RFC reply headers and the Gmail thread ID, including encoded subjects', async () => {
+    const request = vi
+      .fn<typeof fetch>()
+      .mockResolvedValueOnce(Response.json(threadFixture()))
+      .mockResolvedValueOnce(
+        Response.json({ id: 'reply-id', threadId: 'thread-id' }),
+      );
+    const result = await createSender(
+      access,
+      request,
+    )({ ...email, isFollowUp: true, gmailThreadId: 'thread-id' });
+    expect(result).toMatchObject({
+      kind: 'confirmed',
+      gmailMessageId: 'reply-id',
+      gmailThreadId: 'thread-id',
+    });
+    expect(String(request.mock.calls[0]?.[0])).toContain(
+      '/threads/thread-id?format=metadata',
+    );
+    const body = JSON.parse(request.mock.calls[1]?.[1]?.body as string);
+    expect(body.threadId).toBe('thread-id');
+    const mime = Buffer.from(body.raw, 'base64url').toString('utf8');
+    expect(mime).toContain('In-Reply-To: <parent@example.com>');
+    expect(mime).toContain(
+      'References: <original@example.com> <parent@example.com>',
+    );
+    expect(mime).not.toContain('parent-gmail-id');
+    expect(request).toHaveBeenCalledTimes(2);
+  });
+  it('does not submit a follow-up without a thread, with unreadable metadata, or after an inbound reply', async () => {
+    const request = vi.fn<typeof fetch>();
+    expect(
+      (await createSender(access, request)({ ...email, isFollowUp: true }))
+        .kind,
+    ).toBe('definite');
+    expect(request).not.toHaveBeenCalled();
+    request.mockResolvedValueOnce(new Response('', { status: 403 }));
+    expect(
+      (
+        await createSender(
+          access,
+          request,
+        )({ ...email, isFollowUp: true, gmailThreadId: 'thread-id' })
+      ).kind,
+    ).toBe('definite');
+    const thread = threadFixture();
+    thread.messages[0]!.payload.headers[0]!.value = 'Maya <maya@example.com>';
+    request.mockResolvedValueOnce(Response.json(thread));
+    expect(
+      (
+        await createSender(
+          access,
+          request,
+        )({ ...email, isFollowUp: true, gmailThreadId: 'thread-id' })
+      ).kind,
+    ).toBe('definite');
+    expect(
+      request.mock.calls.every(
+        (call) => !call[1]?.method || call[1]?.method === 'GET',
+      ),
+    ).toBe(true);
   });
 });

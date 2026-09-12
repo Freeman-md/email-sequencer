@@ -96,6 +96,8 @@ export class SequencerService implements ISequencerService {
         email: prospect.email,
         subject: candidate.subject,
         message: candidate.message,
+        gmailThreadId: candidate.gmailThreadId || undefined,
+        isFollowUp: candidate.type === 'Follow-up',
         createdAt: candidate.createdAt,
       };
     }
@@ -148,12 +150,12 @@ export class SequencerService implements ISequencerService {
           this.runtime.sent(summary, result.sentAt);
 
           try {
-            await this.interactions.complete(interaction.id, result.sentAt);
+            await this.interactions.complete(interaction.id, result);
           } catch {
             this.runtime.halt({
               kind: 'reconciliation',
               interactionId: interaction.id,
-              message: `Gmail confirmed this send at ${result.sentAt}, but Airtable did not confirm the update. Set this Interaction to Completed with that Sent At before another run. Do not resend it.`,
+              message: `Gmail confirmed this send at ${result.sentAt}, but Airtable did not confirm the update. Set this Interaction to Completed with that Sent At, Gmail Message ID ${result.gmailMessageId} and Gmail Thread ID ${result.gmailThreadId} before another run. Do not resend it.`,
             });
             break;
           }

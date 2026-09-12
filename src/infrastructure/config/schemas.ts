@@ -1,6 +1,8 @@
 import { z } from 'zod';
 
 export const configSchema = z.object({
+  EMAIL_SEQUENCER_OPENAI_API_KEY: z.string().optional(),
+  EMAIL_SEQUENCER_OPENAI_MODEL: z.string().optional(),
   AIRTABLE_API_TOKEN: z.string().min(1),
   AIRTABLE_BASE_ID: z.string().regex(/^app[a-zA-Z0-9]{14}$/),
   EMAIL_SEQUENCER_GOOGLE_CLIENT_ID: z.string().min(1),
