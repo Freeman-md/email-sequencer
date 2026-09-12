@@ -8,8 +8,7 @@ export default defineConfig([
   { rules: { '@typescript-eslint/consistent-type-imports': 'error' } },
   {
     files: [
-      'src/features/sequencer/server/**/*.ts',
-      'src/features/sequencer/types/**/*.ts',
+      'src/features/sequencer/**/*.{ts,tsx}',
       'src/infrastructure/**/*.ts',
       'src/app/api/**/*.ts',
       'src/app/page.tsx',

@@ -141,3 +141,120 @@ test('desktop states, controls and mobile preserve operational fields without ov
   });
   expect(errors).toEqual([]);
 });
+
+for (const staleOutcome of ['success', 'failure'] as const) {
+  test(`ignores a stale polling ${staleOutcome} after Start and keeps Stop available`, async ({
+    page,
+  }) => {
+    let state = fixture();
+    let polls = 0;
+    let release!: () => Promise<void>;
+    let received!: () => void;
+    const held = new Promise<void>((resolve) => {
+      received = resolve;
+    });
+
+    await page.route('**/api/sequencer/**', async (route) => {
+      if (route.request().method() === 'GET') {
+        polls++;
+        if (polls > 2) return;
+        if (polls === 2) {
+          release = async () => {
+            await route.fulfill(
+              staleOutcome === 'success'
+                ? { json: fixture() }
+                : { json: { error: 'Stale poll failed' }, status: 503 },
+            );
+          };
+          received();
+          return;
+        }
+        await route.fulfill({ json: state });
+        return;
+      }
+
+      if (route.request().url().endsWith('/start')) {
+        state = {
+          ...state,
+          run: {
+            ...state.run,
+            status: 'running',
+            phase: 'sending',
+            runStartedAt: '2026-09-09T12:00:00Z',
+          },
+        };
+      } else {
+        state = { ...state, run: { ...state.run, phase: 'stopping' } };
+      }
+      await route.fulfill({ json: state.run, status: 202 });
+    });
+
+    await page.goto('/');
+    await expect(
+      page.getByRole('button', { name: 'Start Run', exact: true }),
+    ).toBeEnabled();
+    await held;
+    await page.getByRole('button', { name: 'Start Run', exact: true }).click();
+    await expect(
+      page.getByRole('button', { name: 'Stop Run', exact: true }),
+    ).toBeEnabled();
+    const staleResponse = page.waitForResponse((response) =>
+      response.url().endsWith('/state'),
+    );
+    await release();
+    await staleResponse;
+    // Keep later polls pending so they cannot hide a stale update.
+    await page.evaluate(
+      () =>
+        new Promise<void>((resolve) => {
+          requestAnimationFrame(() => requestAnimationFrame(() => resolve()));
+        }),
+    );
+    await expect(
+      page.getByText('Stale poll failed', { exact: false }),
+    ).not.toBeVisible();
+    await expect(
+      page.getByRole('button', { name: 'Stop Run', exact: true }),
+    ).toBeEnabled();
+    await page.getByRole('button', { name: 'Stop Run', exact: true }).click();
+    await expect(
+      page.getByRole('button', { name: 'Stopping…', exact: true }),
+    ).toBeDisabled();
+  });
+}
+
+test('review acknowledgement does not carry over to a later failed run', async ({
+  page,
+}) => {
+  const state = fixture();
+  state.run = {
+    ...state.run,
+    status: 'error',
+    phase: 'stopped',
+    runStartedAt: '2026-09-09T12:00:00Z',
+    errors: [
+      {
+        kind: 'uncertain',
+        interactionId: current.id,
+        message: 'Check Gmail before another run.',
+      },
+    ],
+  };
+  await page.route('**/api/sequencer/**', (route) =>
+    route.fulfill({ json: state }),
+  );
+  await page.goto('/');
+  const checkbox = page.getByRole('checkbox');
+  const start = page.getByRole('button', {
+    name: 'Start New Run',
+    exact: true,
+  });
+  await expect(start).toBeDisabled();
+  await checkbox.check();
+  await expect(start).toBeEnabled();
+
+  // A run started elsewhere must require its own acknowledgement even for the same record.
+  state.run = { ...state.run, runStartedAt: '2026-09-09T13:00:00Z' };
+  await expect(checkbox).not.toBeChecked();
+  await expect(start).toBeDisabled();
+});

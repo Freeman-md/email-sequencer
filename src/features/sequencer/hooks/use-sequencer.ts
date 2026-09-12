@@ -1,99 +1,113 @@
 'use client';
-import { useCallback, useEffect, useRef, useState } from 'react';
-import { POLL_INTERVAL_MS } from '../constants/run';
-import type { DashboardState, RunState } from '../types';
 
-export function useSequencer(initial: DashboardState | null) {
+import { useCallback, useEffect, useRef, useState } from 'react';
+
+import { sequencerClient } from '../api/client';
+import { POLL_INTERVAL_MS } from '../constants/run';
+
+import type { ISequencerClient } from '../api/interfaces/client.interface';
+import type { DashboardState } from '../types';
+import type { ServerClockSample } from './use-server-clock';
+
+export function useSequencer(
+  initial: DashboardState | null,
+  client: ISequencerClient = sequencerClient,
+) {
   const [data, setData] = useState(initial);
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
-  const [clock, setClock] = useState(0);
-  const offset = useRef(0);
+  const [clockSample, setClockSample] = useState<ServerClockSample | null>(
+    null,
+  );
   const version = useRef(0);
+  const pendingCommand = useRef(false);
+  const lifecycle = useRef<AbortController | null>(null);
 
   useEffect(() => {
-    let alive = true;
-    let timer: ReturnType<typeof setTimeout>;
     const controller = new AbortController();
+    lifecycle.current = controller;
+    let timer: ReturnType<typeof setTimeout>;
+
     async function poll() {
       const expectedVersion = version.current;
+
       try {
-        const response = await fetch('/api/sequencer/state', {
-          cache: 'no-store',
-          signal: AbortSignal.any([
-            controller.signal,
-            AbortSignal.timeout(25_000),
-          ]),
-        });
-        const result = await response.json();
-        if (!response.ok)
-          throw new Error(result.error ?? 'Unable to read run state.');
-        if (alive && version.current === expectedVersion) {
-          offset.current = Date.parse(result.serverNow) - Date.now();
+        if (pendingCommand.current) return;
+
+        const result = await client.getState(controller.signal);
+        if (!controller.signal.aborted && version.current === expectedVersion) {
+          setClockSample({
+            serverNow: result.serverNow,
+            receivedAt: Date.now(),
+          });
           setData(result);
           setError(null);
         }
       } catch (cause) {
-        if (alive)
+        // An older request must not replace either the state or error from a command.
+        if (!controller.signal.aborted && version.current === expectedVersion) {
           setError(
             cause instanceof Error
               ? cause.message
               : 'Connection lost. The server may still be running.',
           );
+        }
       } finally {
-        if (alive) timer = setTimeout(poll, POLL_INTERVAL_MS);
+        if (!controller.signal.aborted)
+          timer = setTimeout(poll, POLL_INTERVAL_MS);
       }
     }
+
     void poll();
-    const ticking = setInterval(
-      () => setClock(Date.now() + offset.current),
-      1000,
-    );
+
     return () => {
-      alive = false;
       controller.abort();
       clearTimeout(timer);
-      clearInterval(ticking);
     };
-  }, []);
+  }, [client]);
 
   const command = useCallback(
     async (action: 'start' | 'stop', intervalSeconds?: number) => {
-      setBusy(true);
+      const controller = lifecycle.current;
+      if (!controller || controller.signal.aborted || pendingCommand.current)
+        return;
+
+      pendingCommand.current = true;
       version.current++;
+      setBusy(true);
+
       try {
-        const response = await fetch(`/api/sequencer/${action}`, {
-          method: 'POST',
-          signal: AbortSignal.timeout(15_000),
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ intervalSeconds }),
-        });
-        const result: RunState & { error?: string } = await response.json();
-        if (!response.ok)
-          throw new Error(result.error ?? 'Unable to update the run.');
-        version.current++;
-        setData((previous) =>
-          previous ? { ...previous, run: result } : previous,
-        );
-        setError(null);
+        if (action === 'start' && intervalSeconds === undefined) {
+          throw new Error('Provide Interval Seconds before starting.');
+        }
+
+        const result =
+          action === 'start'
+            ? await client.start(intervalSeconds!, controller.signal)
+            : await client.stop(controller.signal);
+
+        if (!controller.signal.aborted) {
+          setData((previous) =>
+            previous ? { ...previous, run: result } : previous,
+          );
+          setError(null);
+        }
       } catch (cause) {
-        setError(
-          cause instanceof Error
-            ? cause.message
-            : 'Request failed. Check the current run state before trying again.',
-        );
+        if (!controller.signal.aborted) {
+          setError(
+            cause instanceof Error
+              ? cause.message
+              : 'Request failed. Check the current run state before trying again.',
+          );
+        }
       } finally {
-        setBusy(false);
+        version.current++;
+        pendingCommand.current = false;
+        if (!controller.signal.aborted) setBusy(false);
       }
     },
-    [],
+    [client],
   );
 
-  return {
-    data,
-    error,
-    busy,
-    command,
-    now: clock || Date.parse(data?.serverNow ?? '') || 0,
-  };
+  return { data, error, busy, command, clockSample };
 }

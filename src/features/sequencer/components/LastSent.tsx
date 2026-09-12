@@ -1,5 +1,6 @@
+import { dateTime } from '../utils/format';
+
 import type { SentInteraction } from '../types';
-import { dateTime } from './format';
 
 export function LastSent({ sent }: { sent: SentInteraction | null }) {
   return (

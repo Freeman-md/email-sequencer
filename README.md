@@ -102,6 +102,18 @@ Stop a run and wait for it to stop before deployments or shutdown. A process res
 
 Prettier handles syntax formatting. ESLint enforces import grouping, type imports and spacing between methods and logical sections in infrastructure, the restructured server, shared feature types, their callers and focused tests. Run `npx eslint <files> --fix` followed by `npx prettier <files> --write` when editing those files.
 
+## Frontend structure
+
+The feature barrel exports `Dashboard`. Component files use PascalCase and preserve the existing page layout.
+
+- `components/`: page composition and presentation for the header, run status, current interaction, last sent and notices.
+- `hooks/`: dashboard data and polling/command coordination, interval and review controls, and the server-aligned clock.
+- `api/client.ts`: browser requests to the existing sequencer routes through an injectable client interface.
+- `presenters/`: pure functions translating run phases into display content.
+- `utils/format.ts`: date and countdown formatting.
+
+Polling responses and failures from before a command cannot overwrite its result. Manual reconciliation acknowledgement is tied to the failed run and its relevant errors. UI tests mock sequencer requests, including delayed responses, so they do not send emails.
+
 ## Infrastructure structure
 
 `src/infrastructure/composition.ts` lazily constructs the external clients and token store. The infrastructure barrel only exports that entry point; feature composition injects its instances into repositories and services. Restart the server after configuration changes or this class restructuring so retained instances use the current setup.
