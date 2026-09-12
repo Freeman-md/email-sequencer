@@ -6,5 +6,46 @@ export default defineConfig([
   ...nextVitals,
   ...nextTypescript,
   { rules: { '@typescript-eslint/consistent-type-imports': 'error' } },
+  {
+    files: [
+      'src/features/sequencer/server/**/*.ts',
+      'src/app/api/**/*.ts',
+      'src/app/page.tsx',
+      'tests/features/sequencer/{sequencer.service,connections.service,repository}.test.ts',
+    ],
+    rules: {
+      'import/order': [
+        'error',
+        {
+          groups: [
+            'builtin',
+            'external',
+            'internal',
+            'parent',
+            'sibling',
+            'index',
+            'type',
+          ],
+          'newlines-between': 'always',
+          alphabetize: { order: 'asc', caseInsensitive: true },
+        },
+      ],
+      'import/newline-after-import': 'error',
+      'lines-between-class-members': [
+        'error',
+        {
+          enforce: [
+            { blankLine: 'always', prev: '*', next: 'method' },
+            { blankLine: 'always', prev: 'method', next: '*' },
+          ],
+        },
+      ],
+      'padding-line-between-statements': [
+        'error',
+        { blankLine: 'always', prev: '*', next: ['return', 'try'] },
+        { blankLine: 'always', prev: ['const', 'let'], next: ['export'] },
+      ],
+    },
+  },
   globalIgnores(['.next/**', '.data/**', 'next-env.d.ts', 'test-results/**']),
 ]);

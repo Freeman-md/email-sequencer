@@ -11,7 +11,8 @@ vi.mock('@/infrastructure/config/env', () => ({
   getConfig: () => ({
     EMAIL_SEQUENCER_GOOGLE_CLIENT_ID: 'test-client',
     EMAIL_SEQUENCER_GOOGLE_CLIENT_SECRET: 'test-only',
-    EMAIL_SEQUENCER_GOOGLE_REDIRECT_URI: 'http://localhost:3000/api/gmail/callback',
+    EMAIL_SEQUENCER_GOOGLE_REDIRECT_URI:
+      'http://localhost:3000/api/gmail/callback',
   }),
 }));
 vi.mock('@/infrastructure/gmail/token-store', () => ({

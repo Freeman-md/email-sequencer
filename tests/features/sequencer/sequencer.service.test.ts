@@ -1,5 +1,9 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { createRunner } from '@/features/sequencer/server/services/runner';
+
+import { SequencerRuntime } from '@/features/sequencer/server/runtime/sequencer-runtime';
+import { SequencerService } from '@/features/sequencer/server/services/sequencer.service';
+
+import type { InteractionRecord } from '@/features/sequencer/server/types';
 import type { Interaction } from '@/features/sequencer/types';
 import type { SendResult } from '@/infrastructure/gmail/send';
 
@@ -13,26 +17,49 @@ const interaction: Interaction = {
   message: 'Hello Maya,\nHere is the message.',
   createdAt: '2026-09-09T08:00:00.000Z',
 };
+const candidate: InteractionRecord = {
+  id: interaction.id,
+  status: 'Draft',
+  direction: 'Outbound',
+  channel: 'Email',
+  prospectIds: ['recProspect'],
+  subject: interaction.subject,
+  message: interaction.message,
+  createdAt: interaction.createdAt,
+};
 const flush = async () => {
   for (let i = 0; i < 12; i++) await Promise.resolve();
 };
 function setup() {
-  const next = vi
-    .fn()
-    .mockResolvedValueOnce(interaction)
-    .mockResolvedValue(null);
+  const next = vi.fn().mockResolvedValueOnce(candidate).mockResolvedValue(null);
   const complete = vi.fn().mockResolvedValue(undefined);
   const send = vi.fn<() => Promise<SendResult>>().mockResolvedValue({
     kind: 'confirmed',
     sentAt: '2026-09-09T12:00:01.000Z',
   });
   const check = vi.fn().mockResolvedValue(undefined);
+  const findById = vi.fn().mockResolvedValue({
+    id: 'recProspect',
+    name: interaction.prospect,
+    company: interaction.company,
+    email: interaction.email,
+  });
+  const runtime = new SequencerRuntime();
+
   return {
+    findById,
+    runtime,
     next,
     complete,
     send,
     check,
-    runner: createRunner({ next, complete, send, check }),
+    runner: new SequencerService(
+      { next, complete, checkConnection: vi.fn() },
+      { findById, checkConnection: vi.fn() },
+      { send },
+      { requireReady: check, getState: vi.fn(), connectGmail: vi.fn() },
+      runtime,
+    ),
   };
 }
 beforeEach(() => {
@@ -68,6 +95,7 @@ describe('one-at-a-time run lifecycle', () => {
       runStartedAt: startedAt,
     });
   });
+
   it('does not write Completed until Gmail confirms', async () => {
     const { runner, send, complete } = setup();
     let resolveSend!: (result: SendResult) => void;
@@ -86,10 +114,11 @@ describe('one-at-a-time run lifecycle', () => {
     runner.stop();
     await flush();
   });
+
   it('leaves definite failures untouched and excludes them for the rest of the run', async () => {
     const { runner, next, send, complete } = setup();
     next.mockImplementation(async (_cutoff, excluded: Set<string>) =>
-      excluded.has(interaction.id) ? null : interaction,
+      excluded.has(interaction.id) ? null : candidate,
     );
     send.mockResolvedValue({ kind: 'definite', message: 'Rejected' });
     runner.start(1);
@@ -106,6 +135,7 @@ describe('one-at-a-time run lifecycle', () => {
       interactionId: interaction.id,
     });
   });
+
   it('stops on an uncertain outcome without a retry or write', async () => {
     const { runner, send, next, complete } = setup();
     send.mockResolvedValue({ kind: 'uncertain', message: 'Timed out' });
@@ -126,6 +156,7 @@ describe('one-at-a-time run lifecycle', () => {
       ],
     });
   });
+
   it('treats an unexpected send exception as uncertain', async () => {
     const { runner, send } = setup();
     send.mockRejectedValue(new Error('Unexpected'));
@@ -133,6 +164,7 @@ describe('one-at-a-time run lifecycle', () => {
     await flush();
     expect(runner.snapshot().errors[0]?.kind).toBe('uncertain');
   });
+
   it('stops for reconciliation if Gmail succeeds but Airtable write fails', async () => {
     const { runner, complete, next } = setup();
     complete.mockRejectedValue(new Error('Unavailable'));
@@ -146,6 +178,7 @@ describe('one-at-a-time run lifecycle', () => {
     });
     expect(runner.snapshot().errors[0]?.kind).toBe('reconciliation');
   });
+
   it('locks before connection checks resolve, and returns immediately', async () => {
     const { runner, check } = setup();
     let finish!: () => void;
@@ -161,6 +194,7 @@ describe('one-at-a-time run lifecycle', () => {
     await flush();
     expect(runner.isActive()).toBe(false);
   });
+
   it('cancels the interval without fetching another record', async () => {
     const { runner, next } = setup();
     runner.start(300);
@@ -174,6 +208,7 @@ describe('one-at-a-time run lifecycle', () => {
       nextSendAt: null,
     });
   });
+
   it('finishes an in-flight send when stopped, then releases the lock', async () => {
     const { runner, send, complete, next } = setup();
     let finish!: (result: SendResult) => void;
@@ -192,10 +227,11 @@ describe('one-at-a-time run lifecycle', () => {
     expect(next).toHaveBeenCalledTimes(1);
     expect(runner.isActive()).toBe(false);
   });
+
   it('refuses a record newer than the run cutoff', async () => {
     const { runner, next, send } = setup();
     next.mockReset().mockResolvedValue({
-      ...interaction,
+      ...candidate,
       createdAt: '2026-09-09T12:00:00.001Z',
     });
     runner.start(300);
@@ -203,18 +239,82 @@ describe('one-at-a-time run lifecycle', () => {
     expect(send).not.toHaveBeenCalled();
     expect(runner.snapshot().status).toBe('error');
   });
+
   it('a new run has a new cutoff and can revisit prior definite failures', async () => {
     const { runner, next, send } = setup();
     send.mockResolvedValue({ kind: 'definite', message: 'Rejected' });
     runner.start(1);
     await vi.runAllTimersAsync();
     vi.setSystemTime(new Date('2026-09-09T13:00:00.000Z'));
-    next.mockResolvedValueOnce(interaction);
+    next.mockResolvedValueOnce(candidate);
     runner.start(1);
     await vi.runAllTimersAsync();
     expect(send).toHaveBeenCalledTimes(2);
     expect(runner.snapshot().runStartedAt).toBe('2026-09-09T13:00:00.000Z');
   });
+
+  it('keeps missing-email candidates excluded after subsequent sends', async () => {
+    const { runner, next, findById, send } = setup();
+    next
+      .mockReset()
+      .mockResolvedValueOnce({ ...candidate, id: 'recNoEmail' })
+      .mockResolvedValueOnce(candidate)
+      .mockResolvedValue(null);
+    findById.mockResolvedValueOnce({
+      id: 'recProspect',
+      name: '',
+      company: '',
+      email: '',
+    });
+
+    runner.start(1);
+    await vi.runAllTimersAsync();
+
+    expect(send).toHaveBeenCalledTimes(1);
+    expect(next.mock.calls[2]?.[1]).toEqual(
+      new Set(['recNoEmail', candidate.id]),
+    );
+    expect(runner.snapshot().status).toBe('completed');
+  });
+
+  it('stops without sending if cancellation arrives during the Prospect read', async () => {
+    const { runner, findById, send } = setup();
+    let finish!: (value: unknown) => void;
+    findById.mockReturnValueOnce(
+      new Promise((resolve) => {
+        finish = resolve;
+      }),
+    );
+
+    runner.start(1);
+    await flush();
+    runner.stop();
+    finish({
+      id: 'recProspect',
+      name: '',
+      company: '',
+      email: interaction.email,
+    });
+    await flush();
+
+    expect(send).not.toHaveBeenCalled();
+    expect(runner.isActive()).toBe(false);
+  });
+
+  it('does not choose an arbitrary recipient when multiple Prospects are linked', async () => {
+    const { runner, next, findById, send } = setup();
+    next
+      .mockReset()
+      .mockResolvedValue({ ...candidate, prospectIds: ['recOne', 'recTwo'] });
+
+    runner.start(1);
+    await flush();
+
+    expect(findById).not.toHaveBeenCalled();
+    expect(send).not.toHaveBeenCalled();
+    expect(runner.snapshot().errors[0]?.message).toContain('exactly one');
+  });
+
   it.each([0, -1, 1.5, NaN, Infinity, 86401])(
     'rejects invalid interval %s',
     (interval) => {

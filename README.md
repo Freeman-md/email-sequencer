@@ -41,15 +41,15 @@ Google External apps in Testing normally receive refresh tokens that expire afte
 
 Every required variable is in `.env.example`:
 
-| Variable               | Value                                               |
-| ---------------------- | --------------------------------------------------- |
-| `AIRTABLE_API_TOKEN`   | Personal access token with record read/write access |
-| `AIRTABLE_BASE_ID`     | `apphI2f8iKVYaDRbg`                                 |
+| Variable                               | Value                                               |
+| -------------------------------------- | --------------------------------------------------- |
+| `AIRTABLE_API_TOKEN`                   | Personal access token with record read/write access |
+| `AIRTABLE_BASE_ID`                     | `apphI2f8iKVYaDRbg`                                 |
 | `EMAIL_SEQUENCER_GOOGLE_CLIENT_ID`     | Web OAuth client ID                                 |
 | `EMAIL_SEQUENCER_GOOGLE_CLIENT_SECRET` | Web OAuth client secret                             |
 | `EMAIL_SEQUENCER_GOOGLE_REDIRECT_URI`  | Exact callback URL, HTTPS in production             |
-| `GMAIL_TOKEN_FILE`     | Private writable file path on persistent storage    |
-| `APP_PASSWORD`         | Strong operator password, at least 16 characters    |
+| `GMAIL_TOKEN_FILE`                     | Private writable file path on persistent storage    |
+| `APP_PASSWORD`                         | Strong operator password, at least 16 characters    |
 
 Configuration is validated at the server boundary. Missing configuration produces named setup errors without printing values. Build does not require credentials. Never use `NEXT_PUBLIC_*` for these variables.
 
@@ -89,6 +89,18 @@ docker run --name email-sequencer --restart unless-stopped \
 ```
 
 Stop a run and wait for it to stop before deployments or shutdown. A process restart resets in-memory run state. A crash between Gmail acceptance and the Airtable update can leave a sent email as Draft: **inspect Gmail and reconcile that record before another run**. Exactly-once delivery across crashes is not guaranteed by this database-free V1. Tokens survive restarts only if their volume persists.
+
+## Server structure
+
+`src/features/sequencer/server/index.ts` only exports the lazy composition entry point. `composition.ts` wires constructor-injected repository and service classes against interfaces and retains one runtime per process.
+
+- `repositories/`: separate Airtable reads and writes for Interactions and Prospects.
+- `mappers/`: validate Airtable field shapes and map records into server types.
+- `services/`: sequence eligibility, recipient resolution, sending and saving; connection checks, caching and mailbox changes.
+- `runtime/`: run state, exclusions, cancellation, interruptible waits and the shared run/mailbox lock.
+- `interfaces/` and `types/`: dependency contracts and server data shapes.
+
+Prettier handles syntax formatting. ESLint enforces import grouping, type imports and spacing between methods and logical sections in the restructured server, its callers and focused tests. Run `npx eslint <files> --fix` followed by `npx prettier <files> --write` when editing those files.
 
 ## Verification
 

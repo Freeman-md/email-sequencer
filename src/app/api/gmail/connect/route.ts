@@ -1,15 +1,16 @@
 import { NextResponse } from 'next/server';
-import { beginOAuth, OAUTH_COOKIE } from '@/infrastructure/gmail/oauth';
+
+import { getSequencerServices } from '@/features/sequencer/server';
 import { appOrigin } from '@/infrastructure/config/env';
 import { apiError } from '@/infrastructure/config/http';
-import { getRunner } from '@/features/sequencer/server';
+import { beginOAuth, OAUTH_COOKIE } from '@/infrastructure/gmail/oauth';
 
 export const runtime = 'nodejs';
 export async function GET(request: Request) {
   try {
     if (request.headers.get('sec-fetch-site') === 'cross-site')
       throw new Error('Open Connect Gmail from the dashboard.');
-    if (getRunner().isActive())
+    if (getSequencerServices().sequencer.isActive())
       throw new Error('Stop the run before changing the Gmail connection.');
     const { state, url } = await beginOAuth();
     const response = NextResponse.redirect(url);
@@ -20,6 +21,7 @@ export async function GET(request: Request) {
       maxAge: 600,
       path: '/api/gmail',
     });
+
     return response;
   } catch (error) {
     return apiError(error);
