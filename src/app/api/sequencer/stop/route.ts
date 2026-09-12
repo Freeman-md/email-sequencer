@@ -1,5 +1,6 @@
 import { getSequencerServices } from '@/features/sequencer/server';
-import { apiError, requireSameOrigin } from '@/infrastructure/config/http';
+import { apiError } from '@/infrastructure/http/api-error';
+import { requireSameOrigin } from '@/infrastructure/http/require-same-origin';
 
 export const runtime = 'nodejs';
 export async function POST(request: Request) {

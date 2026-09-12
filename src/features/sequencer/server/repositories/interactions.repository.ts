@@ -1,6 +1,6 @@
 import 'server-only';
 
-import { recordsSchema, recordSchema } from '@/infrastructure/airtable/client';
+import { recordsSchema, recordSchema } from '@/infrastructure/airtable/schemas';
 
 import { AIRTABLE } from '../../constants/airtable';
 import {
@@ -8,8 +8,8 @@ import {
   mapInteractionCompletion,
 } from '../mappers/interaction.mapper';
 
-import type { AirtableRequest } from '../interfaces/airtable-request.interface';
 import type { IInteractionsRepository } from '../interfaces/interactions-repository.interface';
+import type { IAirtableClient } from '@/infrastructure/airtable/interfaces/client.interface';
 
 const field = AIRTABLE.interaction;
 const literal = (value: string) =>
@@ -42,11 +42,11 @@ export function eligibleQuery(
 }
 
 export class InteractionsRepository implements IInteractionsRepository {
-  constructor(private readonly request: AirtableRequest) {}
+  constructor(private readonly client: IAirtableClient) {}
 
   async next(runStartedAt: string, excludedIds: ReadonlySet<string>) {
     const data = recordsSchema.parse(
-      await this.request(`${AIRTABLE.interactions}/listRecords`, {
+      await this.client.request(`${AIRTABLE.interactions}/listRecords`, {
         method: 'POST',
         body: JSON.stringify(eligibleQuery(runStartedAt, excludedIds)),
       }),
@@ -59,7 +59,7 @@ export class InteractionsRepository implements IInteractionsRepository {
   async complete(id: string, sentAt: string) {
     const result = mapInteractionCompletion(
       recordSchema.parse(
-        await this.request(
+        await this.client.request(
           `${AIRTABLE.interactions}/${encodeURIComponent(id)}`,
           {
             method: 'PATCH',
@@ -90,7 +90,7 @@ export class InteractionsRepository implements IInteractionsRepository {
     Object.values(field).forEach((name) => query.append('fields[]', name));
 
     recordsSchema.parse(
-      await this.request(`${AIRTABLE.interactions}?${query}`),
+      await this.client.request(`${AIRTABLE.interactions}?${query}`),
     );
   }
 }

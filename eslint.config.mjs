@@ -9,9 +9,12 @@ export default defineConfig([
   {
     files: [
       'src/features/sequencer/server/**/*.ts',
+      'src/features/sequencer/types/**/*.ts',
+      'src/infrastructure/**/*.ts',
       'src/app/api/**/*.ts',
       'src/app/page.tsx',
-      'tests/features/sequencer/{sequencer.service,connections.service,repository}.test.ts',
+      'tests/features/sequencer/**/*.test.ts',
+      'tests/infrastructure/**/*.test.ts',
     ],
     rules: {
       'import/order': [

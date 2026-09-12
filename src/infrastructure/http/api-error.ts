@@ -1,13 +1,4 @@
 import 'server-only';
-import { appOrigin } from './env';
-
-export function requireSameOrigin(request: Request) {
-  if (request.headers.get('origin') !== appOrigin()) {
-    throw new Error(
-      'Request origin is not allowed. Open the app at the configured OAuth host.',
-    );
-  }
-}
 
 export function apiError(error: unknown, status = 400) {
   return Response.json(

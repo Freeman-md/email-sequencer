@@ -1,12 +1,12 @@
 import 'server-only';
 
 import type { Connection } from '../../types';
+import type { ConnectionState } from '../../types';
 import type { IConnectionsService } from '../interfaces/connections-service.interface';
 import type { GmailConnection } from '../interfaces/gmail-connection.interface';
 import type { IInteractionsRepository } from '../interfaces/interactions-repository.interface';
 import type { IProspectsRepository } from '../interfaces/prospects-repository.interface';
 import type { SequencerRuntime } from '../runtime/sequencer-runtime';
-import type { ConnectionState } from '../types';
 
 export class ConnectionsService implements IConnectionsService {
   private cache?: { expires: number; value: Promise<ConnectionState> };
@@ -39,7 +39,7 @@ export class ConnectionsService implements IConnectionsService {
     this.runtime.beginConnectionChange();
 
     try {
-      await this.gmail.authorize(state, cookie, code);
+      await this.gmail.completeAuthorization(state, cookie, code);
       this.cache = undefined;
     } finally {
       this.runtime.endConnectionChange();
@@ -61,7 +61,7 @@ export class ConnectionsService implements IConnectionsService {
 
         return { connected: true, detail: 'Connected' };
       }),
-      this.inspect(() => this.gmail.check()),
+      this.inspect(() => this.gmail.checkConnection()),
     ]);
 
     return { airtable, gmail };

@@ -1,5 +1,5 @@
 import { getSequencerServices } from '@/features/sequencer/server';
-import { apiError } from '@/infrastructure/config/http';
+import { apiError } from '@/infrastructure/http/api-error';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';

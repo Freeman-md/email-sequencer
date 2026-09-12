@@ -1,7 +1,8 @@
-import { afterEach, describe, expect, it, vi } from 'vitest';
 import { NextRequest } from 'next/server';
+import { afterEach, describe, expect, it, vi } from 'vitest';
+
+import { requireSameOrigin } from '@/infrastructure/http/require-same-origin';
 import { proxy } from '@/proxy';
-import { requireSameOrigin } from '@/infrastructure/config/http';
 
 vi.mock('@/infrastructure/config/env', () => ({
   appOrigin: () => 'http://localhost:3000',

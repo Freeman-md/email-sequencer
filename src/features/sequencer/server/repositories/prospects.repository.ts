@@ -1,19 +1,21 @@
 import 'server-only';
 
-import { recordSchema, recordsSchema } from '@/infrastructure/airtable/client';
+import { recordSchema, recordsSchema } from '@/infrastructure/airtable/schemas';
 
 import { AIRTABLE } from '../../constants/airtable';
 import { mapProspect } from '../mappers/prospect.mapper';
 
-import type { AirtableRequest } from '../interfaces/airtable-request.interface';
 import type { IProspectsRepository } from '../interfaces/prospects-repository.interface';
+import type { IAirtableClient } from '@/infrastructure/airtable/interfaces/client.interface';
 
 export class ProspectsRepository implements IProspectsRepository {
-  constructor(private readonly request: AirtableRequest) {}
+  constructor(private readonly client: IAirtableClient) {}
 
   async findById(id: string) {
     const record = recordSchema.parse(
-      await this.request(`${AIRTABLE.prospects}/${encodeURIComponent(id)}`),
+      await this.client.request(
+        `${AIRTABLE.prospects}/${encodeURIComponent(id)}`,
+      ),
     );
 
     if (record.id !== id) {
@@ -34,6 +36,8 @@ export class ProspectsRepository implements IProspectsRepository {
       query.append('fields[]', name),
     );
 
-    recordsSchema.parse(await this.request(`${AIRTABLE.prospects}?${query}`));
+    recordsSchema.parse(
+      await this.client.request(`${AIRTABLE.prospects}?${query}`),
+    );
   }
 }

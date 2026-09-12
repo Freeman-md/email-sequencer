@@ -1,4 +1,4 @@
-import type { AirtableRecord } from '@/infrastructure/airtable/client';
+import type { AirtableRecord } from '@/infrastructure/airtable/schemas';
 
 export function textField(record: AirtableRecord, key: string): string {
   const value = record.fields[key];

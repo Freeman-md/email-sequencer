@@ -98,9 +98,22 @@ Stop a run and wait for it to stop before deployments or shutdown. A process res
 - `mappers/`: validate Airtable field shapes and map records into server types.
 - `services/`: sequence eligibility, recipient resolution, sending and saving; connection checks, caching and mailbox changes.
 - `runtime/`: run state, exclusions, cancellation, interruptible waits and the shared run/mailbox lock.
-- `interfaces/` and `types/`: dependency contracts and server data shapes.
+- `interfaces/` and `types/`: dependency contracts and server data shapes. Feature-level `types/` contains shared summaries, run state and dashboard contracts; email bodies and Airtable-derived entities stay under server types.
 
-Prettier handles syntax formatting. ESLint enforces import grouping, type imports and spacing between methods and logical sections in the restructured server, its callers and focused tests. Run `npx eslint <files> --fix` followed by `npx prettier <files> --write` when editing those files.
+Prettier handles syntax formatting. ESLint enforces import grouping, type imports and spacing between methods and logical sections in infrastructure, the restructured server, shared feature types, their callers and focused tests. Run `npx eslint <files> --fix` followed by `npx prettier <files> --write` when editing those files.
+
+## Infrastructure structure
+
+`src/infrastructure/composition.ts` lazily constructs the external clients and token store. The infrastructure barrel only exports that entry point; feature composition injects its instances into repositories and services. Restart the server after configuration changes or this class restructuring so retained instances use the current setup.
+
+- `airtable/client.ts`: injected configuration and HTTP transport. Response schemas live in `schemas.ts`.
+- `gmail/client.ts`: Google SDK operations, send requests and safe rejection translation. Sends never retry automatically.
+- `gmail/service.ts`: OAuth state and PKCE coordination, token persistence coordination, connection checks and MIME preparation.
+- `gmail/token-store.ts`: private token-file reads and atomic writes. Tests use a mocked filesystem.
+- `email/`: provider-independent sender interface and message/result types.
+- `config/` and `http/`: environment validation and request/response helpers, respectively.
+
+Schemas validate external data and supply inferred types where appropriate. Ordinary internal data shapes remain TypeScript types. Infrastructure classes receive dependencies through constructors; helpers stay within their owning module.
 
 ## Verification
 

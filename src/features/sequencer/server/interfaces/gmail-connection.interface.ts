@@ -1,8 +1,8 @@
 import type { Connection } from '../../types';
 
 export interface GmailConnection {
-  check(): Promise<Connection>;
-  authorize(
+  checkConnection(): Promise<Connection>;
+  completeAuthorization(
     state: string,
     cookie: string | undefined,
     code: string,

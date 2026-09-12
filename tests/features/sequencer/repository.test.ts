@@ -56,7 +56,7 @@ describe('Airtable contract', () => {
       .mockResolvedValueOnce({ records: [record] })
       .mockResolvedValueOnce(prospect);
     expect(
-      await new InteractionsRepository(request).next(cutoff, new Set()),
+      await new InteractionsRepository({ request }).next(cutoff, new Set()),
     ).toMatchObject({
       id: record.id,
       prospectIds: ['recProspect'],
@@ -64,7 +64,7 @@ describe('Airtable contract', () => {
       message: 'Exact message',
     });
     expect(
-      await new ProspectsRepository(request).findById('recProspect'),
+      await new ProspectsRepository({ request }).findById('recProspect'),
     ).toMatchObject({ email: 'maya@example.com' });
     expect(request.mock.calls[0]?.[0]).toBe(
       `${AIRTABLE.interactions}/listRecords`,
@@ -80,7 +80,7 @@ describe('Airtable contract', () => {
       .mockResolvedValue({ ...prospect, fields: { Email: 42 } });
 
     await expect(
-      new ProspectsRepository(request).findById('recProspect'),
+      new ProspectsRepository({ request }).findById('recProspect'),
     ).rejects.toThrow('Expected text');
   });
 
@@ -89,7 +89,7 @@ describe('Airtable contract', () => {
       id: record.id,
       fields: { Status: 'Completed', 'Sent At': cutoff },
     });
-    await new InteractionsRepository(request).complete(record.id, cutoff);
+    await new InteractionsRepository({ request }).complete(record.id, cutoff);
     expect(request.mock.calls[0]?.[1]).toEqual({
       method: 'PATCH',
       body: JSON.stringify({
@@ -98,7 +98,7 @@ describe('Airtable contract', () => {
     });
     request.mockResolvedValue({ id: record.id, fields: { Status: 'Draft' } });
     await expect(
-      new InteractionsRepository(request).complete(record.id, cutoff),
+      new InteractionsRepository({ request }).complete(record.id, cutoff),
     ).rejects.toThrow('did not confirm');
   });
 });

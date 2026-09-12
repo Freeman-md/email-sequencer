@@ -2,7 +2,7 @@ import { NextResponse } from 'next/server';
 
 import { getSequencerServices } from '@/features/sequencer/server';
 import { appOrigin } from '@/infrastructure/config/env';
-import { OAUTH_COOKIE } from '@/infrastructure/gmail/oauth';
+import { OAUTH_COOKIE } from '@/infrastructure/gmail/service';
 
 import type { NextRequest } from 'next/server';
 

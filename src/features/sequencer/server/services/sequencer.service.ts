@@ -1,13 +1,14 @@
 import 'server-only';
 
-import type { DashboardState, Interaction } from '../../types';
+import type { DashboardState } from '../../types';
 import type { IConnectionsService } from '../interfaces/connections-service.interface';
-import type { EmailSender } from '../interfaces/email-sender.interface';
 import type { IInteractionsRepository } from '../interfaces/interactions-repository.interface';
 import type { IProspectsRepository } from '../interfaces/prospects-repository.interface';
 import type { ISequencerService } from '../interfaces/sequencer-service.interface';
 import type { SequencerRuntime } from '../runtime/sequencer-runtime';
-import type { SendResult } from '@/infrastructure/gmail/send';
+import type { Interaction } from '../types';
+import type { EmailSender } from '@/infrastructure/email/interfaces/sender.interface';
+import type { SendResult } from '@/infrastructure/email/types/send-result';
 
 export class SequencerService implements ISequencerService {
   constructor(

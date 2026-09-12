@@ -1,29 +1,32 @@
-import { afterEach, describe, expect, it, vi } from 'vitest';
-import {
-  beginOAuth,
-  finishOAuth,
-  GMAIL_SEND_SCOPE,
-} from '@/infrastructure/gmail/oauth';
 import { LoginTicket, OAuth2Client } from 'google-auth-library';
-import { writeToken } from '@/infrastructure/gmail/token-store';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 
-vi.mock('@/infrastructure/config/env', () => ({
-  getConfig: () => ({
-    EMAIL_SEQUENCER_GOOGLE_CLIENT_ID: 'test-client',
-    EMAIL_SEQUENCER_GOOGLE_CLIENT_SECRET: 'test-only',
-    EMAIL_SEQUENCER_GOOGLE_REDIRECT_URI:
-      'http://localhost:3000/api/gmail/callback',
-  }),
-}));
-vi.mock('@/infrastructure/gmail/token-store', () => ({
-  readToken: vi.fn(async () => null),
-  writeToken: vi.fn(async () => undefined),
-}));
+import { GmailClient, GMAIL_SEND_SCOPE } from '@/infrastructure/gmail/client';
+import { GmailService } from '@/infrastructure/gmail/service';
+
+function setup() {
+  const writeToken = vi.fn(async () => undefined);
+  const service = new GmailService(
+    new GmailClient(
+      'test-client',
+      () =>
+        new OAuth2Client({
+          clientId: 'test-client',
+          clientSecret: 'test-only',
+          redirectUri: 'http://localhost:3000/api/gmail/callback',
+        }),
+    ),
+    { read: vi.fn(async () => null), write: writeToken },
+  );
+
+  return { service, writeToken };
+}
 afterEach(() => vi.restoreAllMocks());
 
 describe('Gmail OAuth', () => {
   it('requests only send and identity scopes with offline access, state and PKCE', async () => {
-    const { url, state } = await beginOAuth();
+    const { service } = setup();
+    const { url, state } = await service.beginAuthorization();
     const params = new URL(url).searchParams;
     expect(params.get('scope')?.split(' ')).toEqual([
       GMAIL_SEND_SCOPE,
@@ -36,23 +39,26 @@ describe('Gmail OAuth', () => {
     expect(params.get('code_challenge')).toBeTruthy();
   });
   it('rejects mismatched callback state before exchanging a code', async () => {
+    const { service, writeToken } = setup();
     const exchange = vi.spyOn(OAuth2Client.prototype, 'getToken');
-    const { state } = await beginOAuth();
+    const { state } = await service.beginAuthorization();
     await expect(
-      finishOAuth(state, 'wrong-cookie', 'fake-code'),
+      service.completeAuthorization(state, 'wrong-cookie', 'fake-code'),
     ).rejects.toThrow('expired');
     expect(exchange).not.toHaveBeenCalled();
     expect(writeToken).not.toHaveBeenCalled();
   });
   it('rejects expired state', async () => {
-    const { state } = await beginOAuth();
+    const { service } = setup();
+    const { state } = await service.beginAuthorization();
     const time = Date.now();
     vi.spyOn(Date, 'now').mockReturnValue(time + 601_000);
-    await expect(finishOAuth(state, state, 'fake-code')).rejects.toThrow(
-      'expired',
-    );
+    await expect(
+      service.completeAuthorization(state, state, 'fake-code'),
+    ).rejects.toThrow('expired');
   });
   it('stores only the refresh token and verified identity, and consumes state once', async () => {
+    const { service, writeToken } = setup();
     const exchange = vi
       .spyOn(OAuth2Client.prototype, 'getToken')
       .mockImplementation(async () => ({
@@ -76,8 +82,8 @@ describe('Gmail OAuth', () => {
           email_verified: true,
         }),
     );
-    const { state } = await beginOAuth();
-    await finishOAuth(state, state, 'fake-code');
+    const { state } = await service.beginAuthorization();
+    await service.completeAuthorization(state, state, 'fake-code');
     expect(writeToken).toHaveBeenCalledWith({
       refreshToken: 'fake-refresh',
       email: 'operator@example.com',
@@ -88,9 +94,42 @@ describe('Gmail OAuth', () => {
         codeVerifier: expect.any(String),
       }),
     );
-    await expect(finishOAuth(state, state, 'fake-code')).rejects.toThrow(
-      'expired',
-    );
+    await expect(
+      service.completeAuthorization(state, state, 'fake-code'),
+    ).rejects.toThrow('expired');
     expect(exchange).toHaveBeenCalledTimes(1);
+  });
+
+  it('reuses a refresh token only for the same verified mailbox', async () => {
+    const tokens = {
+      read: vi.fn().mockResolvedValue({
+        refreshToken: 'fake-existing',
+        email: 'operator@example.com',
+      }),
+      write: vi.fn(),
+    };
+    const client = {
+      authorization: vi.fn().mockResolvedValue({
+        verifier: 'fake-verifier',
+        url: 'https://example.com/oauth',
+      }),
+      exchange: vi.fn().mockResolvedValue({ email: 'operator@example.com' }),
+      accessToken: vi.fn(),
+      send: vi.fn(),
+    };
+    const service = new GmailService(client, tokens);
+    const first = await service.beginAuthorization();
+    await service.completeAuthorization(first.state, first.state, 'fake-code');
+    expect(tokens.write).toHaveBeenCalledWith({
+      refreshToken: 'fake-existing',
+      email: 'operator@example.com',
+    });
+
+    client.exchange.mockResolvedValue({ email: 'different@example.com' });
+    const second = await service.beginAuthorization();
+    await expect(
+      service.completeAuthorization(second.state, second.state, 'fake-code'),
+    ).rejects.toThrow('Gmail connection failed');
+    expect(tokens.write).toHaveBeenCalledTimes(1);
   });
 });

@@ -3,7 +3,7 @@ import { AIRTABLE } from '../../constants/airtable';
 import { textField } from './record-fields';
 
 import type { Prospect } from '../types';
-import type { AirtableRecord } from '@/infrastructure/airtable/client';
+import type { AirtableRecord } from '@/infrastructure/airtable/schemas';
 
 export function mapProspect(record: AirtableRecord): Prospect {
   return {

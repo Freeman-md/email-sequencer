@@ -12,8 +12,10 @@ function setup() {
   };
   const prospects = { findById: vi.fn(), checkConnection: vi.fn() };
   const gmail = {
-    check: vi.fn().mockResolvedValue({ connected: true, detail: 'Connected' }),
-    authorize: vi.fn().mockResolvedValue(undefined),
+    checkConnection: vi
+      .fn()
+      .mockResolvedValue({ connected: true, detail: 'Connected' }),
+    completeAuthorization: vi.fn().mockResolvedValue(undefined),
   };
   const connections = new ConnectionsService(
     interactions,
@@ -30,7 +32,7 @@ describe('connection coordination', () => {
     const { connections, gmail, interactions } = setup();
 
     await Promise.all([connections.getState(), connections.getState()]);
-    expect(gmail.check).toHaveBeenCalledTimes(1);
+    expect(gmail.checkConnection).toHaveBeenCalledTimes(1);
 
     interactions.checkConnection.mockRejectedValueOnce(
       new Error('Unavailable'),
@@ -39,13 +41,13 @@ describe('connection coordination', () => {
 
     await connections.connectGmail('state', 'cookie', 'code');
     expect((await connections.getState()).airtable.connected).toBe(true);
-    expect(gmail.check).toHaveBeenCalledTimes(3);
+    expect(gmail.checkConnection).toHaveBeenCalledTimes(3);
   });
 
   it('excludes runs and overlapping mailbox changes, releasing the lock on failure', async () => {
     const { connections, gmail, runtime } = setup();
     let reject!: (error: Error) => void;
-    gmail.authorize.mockReturnValueOnce(
+    gmail.completeAuthorization.mockReturnValueOnce(
       new Promise((_resolve, fail) => {
         reject = fail;
       }),
@@ -64,7 +66,7 @@ describe('connection coordination', () => {
     await expect(
       connections.connectGmail('state', 'cookie', 'code'),
     ).rejects.toThrow('Stop the run');
-    expect(gmail.authorize).toHaveBeenCalledTimes(1);
+    expect(gmail.completeAuthorization).toHaveBeenCalledTimes(1);
     runtime.stop();
     runtime.finish();
   });

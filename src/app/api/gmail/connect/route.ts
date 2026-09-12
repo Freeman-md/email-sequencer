@@ -1,9 +1,10 @@
 import { NextResponse } from 'next/server';
 
 import { getSequencerServices } from '@/features/sequencer/server';
+import { getInfrastructure } from '@/infrastructure';
 import { appOrigin } from '@/infrastructure/config/env';
-import { apiError } from '@/infrastructure/config/http';
-import { beginOAuth, OAUTH_COOKIE } from '@/infrastructure/gmail/oauth';
+import { OAUTH_COOKIE } from '@/infrastructure/gmail/service';
+import { apiError } from '@/infrastructure/http/api-error';
 
 export const runtime = 'nodejs';
 export async function GET(request: Request) {
@@ -12,7 +13,7 @@ export async function GET(request: Request) {
       throw new Error('Open Connect Gmail from the dashboard.');
     if (getSequencerServices().sequencer.isActive())
       throw new Error('Stop the run before changing the Gmail connection.');
-    const { state, url } = await beginOAuth();
+    const { state, url } = await getInfrastructure().gmail.beginAuthorization();
     const response = NextResponse.redirect(url);
     response.cookies.set(OAUTH_COOKIE, state, {
       httpOnly: true,

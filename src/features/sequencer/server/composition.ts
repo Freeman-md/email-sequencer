@@ -1,9 +1,6 @@
 import 'server-only';
 
-import { airtableRequest } from '@/infrastructure/airtable/client';
-import { getConfig } from '@/infrastructure/config/env';
-import { finishOAuth, gmailConnection } from '@/infrastructure/gmail/oauth';
-import { createGmailSender } from '@/infrastructure/gmail/send';
+import { getInfrastructure } from '@/infrastructure';
 
 import { InteractionsRepository } from './repositories/interactions.repository';
 import { ProspectsRepository } from './repositories/prospects.repository';
@@ -12,19 +9,20 @@ import { ConnectionsService } from './services/connections.service';
 import { SequencerService } from './services/sequencer.service';
 
 function composeServices() {
+  const { airtable, gmail } = getInfrastructure();
   const runtime = new SequencerRuntime();
-  const interactions = new InteractionsRepository(airtableRequest);
-  const prospects = new ProspectsRepository(airtableRequest);
+  const interactions = new InteractionsRepository(airtable);
+  const prospects = new ProspectsRepository(airtable);
   const connections = new ConnectionsService(
     interactions,
     prospects,
-    { check: gmailConnection, authorize: finishOAuth },
+    gmail,
     runtime,
   );
   const sequencer = new SequencerService(
     interactions,
     prospects,
-    { send: createGmailSender() },
+    gmail,
     connections,
     runtime,
   );
@@ -38,7 +36,6 @@ const processState = globalThis as typeof globalThis & {
 };
 
 export function getSequencerServices() {
-  getConfig();
   processState.emailSequencerServices ??= composeServices();
 
   return processState.emailSequencerServices;

@@ -4,8 +4,8 @@ import { SequencerRuntime } from '@/features/sequencer/server/runtime/sequencer-
 import { SequencerService } from '@/features/sequencer/server/services/sequencer.service';
 
 import type { InteractionRecord } from '@/features/sequencer/server/types';
-import type { Interaction } from '@/features/sequencer/types';
-import type { SendResult } from '@/infrastructure/gmail/send';
+import type { Interaction } from '@/features/sequencer/server/types';
+import type { SendResult } from '@/infrastructure/email/types/send-result';
 
 const startedAt = '2026-09-09T12:00:00.000Z';
 const interaction: Interaction = {

@@ -1,5 +1,31 @@
+import { OAuth2Client } from 'google-auth-library';
 import { describe, expect, it, vi } from 'vitest';
-import { createGmailSender } from '@/infrastructure/gmail/send';
+
+import { GmailClient } from '@/infrastructure/gmail/client';
+import { GmailService } from '@/infrastructure/gmail/service';
+
+function createSender(
+  accessToken: () => Promise<string>,
+  request: typeof fetch,
+  now = () => new Date(),
+) {
+  const client = new GmailClient(
+    'test-client',
+    () => new OAuth2Client(),
+    request,
+    now,
+  );
+  vi.spyOn(client, 'accessToken').mockImplementation(accessToken);
+  const service = new GmailService(client, {
+    read: vi.fn().mockResolvedValue({
+      refreshToken: 'fake-refresh',
+      email: 'operator@example.com',
+    }),
+    write: vi.fn(),
+  });
+
+  return service.send.bind(service);
+}
 
 const email = {
   email: 'maya@example.com',
@@ -13,7 +39,7 @@ describe('Gmail outcome boundaries', () => {
     const send = vi
       .fn<typeof fetch>()
       .mockResolvedValue(Response.json({ id: 'gmail-id' }));
-    const result = await createGmailSender(
+    const result = await createSender(
       access,
       send,
       () => new Date('2026-09-09T12:00:01Z'),
@@ -34,9 +60,7 @@ describe('Gmail outcome boundaries', () => {
       const send = vi
         .fn<typeof fetch>()
         .mockResolvedValue(new Response('', { status }));
-      expect((await createGmailSender(access, send)(email)).kind).toBe(
-        'definite',
-      );
+      expect((await createSender(access, send)(email)).kind).toBe('definite');
       expect(send).toHaveBeenCalledTimes(1);
     },
   );
@@ -46,9 +70,7 @@ describe('Gmail outcome boundaries', () => {
       const send = vi
         .fn<typeof fetch>()
         .mockResolvedValue(new Response('', { status }));
-      expect((await createGmailSender(access, send)(email)).kind).toBe(
-        'uncertain',
-      );
+      expect((await createSender(access, send)(email)).kind).toBe('uncertain');
       expect(send).toHaveBeenCalledTimes(1);
     },
   );
@@ -56,26 +78,22 @@ describe('Gmail outcome boundaries', () => {
     const send = vi
       .fn<typeof fetch>()
       .mockRejectedValue(new Error('Connection lost'));
-    expect((await createGmailSender(access, send)(email)).kind).toBe(
-      'uncertain',
-    );
+    expect((await createSender(access, send)(email)).kind).toBe('uncertain');
     send.mockResolvedValue(Response.json({}));
-    expect((await createGmailSender(access, send)(email)).kind).toBe(
-      'uncertain',
-    );
+    expect((await createSender(access, send)(email)).kind).toBe('uncertain');
   });
   it('does not submit anything when authorization or recipient validation fails', async () => {
     const send = vi.fn<typeof fetch>();
     expect(
       (
-        await createGmailSender(async () => {
+        await createSender(async () => {
           throw new Error('Expired');
         }, send)(email)
       ).kind,
     ).toBe('definite');
     expect(
       (
-        await createGmailSender(
+        await createSender(
           access,
           send,
         )({ ...email, email: 'a@example.com\r\nBcc: b@example.com' })
@@ -103,7 +121,7 @@ describe('Gmail outcome boundaries', () => {
           { status: 403 },
         ),
       );
-      const result = await createGmailSender(access, send)(email);
+      const result = await createSender(access, send)(email);
       expect(result.kind).toBe('definite');
       if (result.kind !== 'confirmed') {
         expect(result.message).toContain(expected);
@@ -123,7 +141,7 @@ describe('Gmail outcome boundaries', () => {
       new Response('not JSON', { status: 403 }),
     ]) {
       const send = vi.fn<typeof fetch>().mockResolvedValue(response);
-      const result = await createGmailSender(access, send)(email);
+      const result = await createSender(access, send)(email);
       expect(result.kind).toBe('definite');
       if (result.kind !== 'confirmed') {
         expect(result.message).toContain('no recognized error reason');

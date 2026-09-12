@@ -3,7 +3,7 @@ import { AIRTABLE } from '../../constants/airtable';
 import { textField } from './record-fields';
 
 import type { InteractionRecord } from '../types';
-import type { AirtableRecord } from '@/infrastructure/airtable/client';
+import type { AirtableRecord } from '@/infrastructure/airtable/schemas';
 
 export function mapInteraction(record: AirtableRecord): InteractionRecord {
   const field = AIRTABLE.interaction;

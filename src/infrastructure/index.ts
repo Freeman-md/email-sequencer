@@ -1,0 +1,1 @@
+export { getInfrastructure } from './composition';
