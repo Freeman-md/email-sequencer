@@ -10,6 +10,13 @@ export function useFollowUps(client: IFollowUpsClient = followUpsClient) {
   const [state, setState] = useState(initialPreparationState);
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
+  const [loaded, setLoaded] = useState(false);
+  const [limit, setLimit] = useState('');
+  const limitValue = limit.trim() ? Number(limit) : undefined;
+  const validLimit =
+    limitValue === undefined ||
+    (Number.isSafeInteger(limitValue) && limitValue > 0);
+  const active = state.status === 'running' || state.status === 'stopping';
   const version = useRef(0);
   const pending = useRef(false);
   const lifecycle = useRef<AbortController | null>(null);
@@ -25,12 +32,15 @@ export function useFollowUps(client: IFollowUpsClient = followUpsClient) {
         const result = await client.getState(controller.signal);
         if (!controller.signal.aborted && expected === version.current) {
           setState(result);
+          setLoaded(true);
           setError(null);
         }
-      } catch {
+      } catch (cause) {
         if (!controller.signal.aborted && expected === version.current)
           setError(
-            'Cannot read preparation status. The server may still be preparing drafts.',
+            cause instanceof Error
+              ? cause.message
+              : 'Cannot read preparation status. The server may still be preparing drafts.',
           );
       } finally {
         if (!controller.signal.aborted) timer = setTimeout(poll, 2000);
@@ -43,7 +53,7 @@ export function useFollowUps(client: IFollowUpsClient = followUpsClient) {
       clearTimeout(timer);
     };
   }, [client]);
-  async function prepare() {
+  async function command(action: 'prepare' | 'stop') {
     const controller = lifecycle.current;
     if (!controller || controller.signal.aborted || pending.current) return;
     pending.current = true;
@@ -51,7 +61,14 @@ export function useFollowUps(client: IFollowUpsClient = followUpsClient) {
     setBusy(true);
 
     try {
-      const result = await client.prepare(controller.signal);
+      if (action === 'prepare' && !validLimit)
+        throw new Error(
+          'Draft limit must be a positive whole number, or left blank.',
+        );
+      const result =
+        action === 'prepare'
+          ? await client.prepare(controller.signal, limitValue)
+          : await client.stop(controller.signal);
       if (!controller.signal.aborted) {
         setState(result);
         setError(null);
@@ -70,5 +87,16 @@ export function useFollowUps(client: IFollowUpsClient = followUpsClient) {
     }
   }
 
-  return { state, error, busy: busy || state.status === 'running', prepare };
+  return {
+    state,
+    error,
+    busy,
+    loaded,
+    active,
+    limit,
+    setLimit,
+    validLimit,
+    prepare: () => command('prepare'),
+    stop: () => command('stop'),
+  };
 }

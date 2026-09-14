@@ -1,6 +1,7 @@
 import type { PreparationState } from '../../types/preparation';
 
 export interface IFollowUpsService {
-  start(): PreparationState;
+  start(limit?: number): PreparationState;
+  stop(): PreparationState;
   snapshot(): PreparationState;
 }

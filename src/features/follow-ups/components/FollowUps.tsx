@@ -2,7 +2,18 @@
 import { useFollowUps } from '../hooks/use-follow-ups';
 
 export function FollowUps() {
-  const { state, error, busy, prepare } = useFollowUps();
+  const {
+    state,
+    error,
+    busy,
+    loaded,
+    active,
+    limit,
+    setLimit,
+    validLimit,
+    prepare,
+    stop,
+  } = useFollowUps();
 
   return (
     <section className="follow-ups" aria-labelledby="follow-ups-title">
@@ -14,27 +25,79 @@ export function FollowUps() {
             then start the sequencer to send.
           </p>
         </div>
-        <button
-          className="primary"
-          disabled={busy}
-          onClick={() => void prepare()}
-        >
-          {busy ? 'Preparing…' : 'Prepare Follow-Ups'}
-        </button>
+        <div className="follow-ups-controls">
+          <label htmlFor="follow-up-limit">
+            Draft limit <span className="muted">(optional)</span>
+          </label>
+          <input
+            id="follow-up-limit"
+            type="number"
+            min="1"
+            step="1"
+            placeholder="No limit"
+            value={active ? (state.limit ?? '') : limit}
+            onChange={(event) => setLimit(event.target.value)}
+            disabled={!loaded || busy || active}
+            aria-invalid={!validLimit}
+            aria-describedby="follow-up-limit-help"
+          />
+          <small
+            id="follow-up-limit-help"
+            className={!validLimit ? 'danger-text' : 'muted'}
+          >
+            {!validLimit
+              ? 'Enter a positive whole number.'
+              : 'Blank means all due prospects. Skips do not count.'}
+          </small>
+          {active ? (
+            <button
+              className="primary stop"
+              disabled={busy || state.status === 'stopping'}
+              onClick={() => void stop()}
+            >
+              {state.status === 'stopping' ? 'Stopping…' : 'Stop Preparation'}
+            </button>
+          ) : (
+            <button
+              className="primary"
+              disabled={!loaded || busy || !validLimit}
+              onClick={() => void prepare()}
+            >
+              {busy ? 'Starting…' : 'Prepare Follow-Ups'}
+            </button>
+          )}
+        </div>
       </div>
       <div role="status" aria-live="polite">
         {state.status !== 'idle' && (
           <p>
             {state.status === 'running'
               ? 'Preparing'
-              : state.status === 'error'
-                ? 'Preparation stopped'
-                : 'Preparation complete'}{' '}
+              : state.status === 'stopping'
+                ? 'Stopping preparation'
+                : state.status === 'stopped'
+                  ? 'Preparation stopped'
+                  : state.status === 'error'
+                    ? 'Preparation stopped'
+                    : 'Preparation complete'}{' '}
             · Checked: {state.checked} · Eligible: {state.eligible} · Drafted:{' '}
-            {state.drafted} · Skipped: {state.skipped}
+            {state.drafted}
+            {state.limit !== null ? ` / ${state.limit}` : ''} · Skipped:{' '}
+            {state.skipped}
+            {state.status === 'completed' &&
+            state.limit !== null &&
+            state.drafted >= state.limit
+              ? ' · Draft limit reached'
+              : ''}
           </p>
         )}
       </div>
+      {state.status === 'stopping' && (
+        <p className="muted">
+          Waiting for the current request to settle. Any draft save already
+          started will finish.
+        </p>
+      )}
       {(error || state.error) && (
         <p role="alert" className="danger-text">
           {error || state.error}

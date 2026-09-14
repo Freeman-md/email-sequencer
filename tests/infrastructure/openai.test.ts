@@ -49,3 +49,31 @@ it('requests bounded text generation without tools and rejects incomplete or ref
   }
   expect(request).toHaveBeenCalledTimes(3);
 });
+
+it('propagates cancellation to the generation request', async () => {
+  const cancellation = new AbortController();
+  const request = vi.fn<typeof fetch>().mockImplementation(
+    (_url, init) =>
+      new Promise((_resolve, reject) => {
+        init!.signal!.addEventListener(
+          'abort',
+          () => reject(new Error('Cancelled')),
+          { once: true },
+        );
+      }),
+  );
+  const client = new OpenAIClient(
+    { apiKey: 'synthetic-test-key', model: 'configured-model' },
+    request,
+  );
+  const generation = client.generate(
+    'Write.',
+    'Existing context',
+    cancellation.signal,
+  );
+  const outcome = expect(generation).rejects.toThrow('generation failed');
+  cancellation.abort();
+  await outcome;
+  expect(request.mock.calls[0]?.[1]?.signal?.aborted).toBe(true);
+  expect(request).toHaveBeenCalledTimes(1);
+});

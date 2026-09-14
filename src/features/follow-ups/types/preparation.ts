@@ -1,6 +1,7 @@
 export type PreparationState = {
-  status: 'idle' | 'running' | 'completed' | 'error';
+  status: 'idle' | 'running' | 'stopping' | 'stopped' | 'completed' | 'error';
   startedAt: string | null;
+  limit: number | null;
   checked: number;
   eligible: number;
   drafted: number;
@@ -13,6 +14,7 @@ export type PreparationState = {
 export const initialPreparationState = (): PreparationState => ({
   status: 'idle',
   startedAt: null,
+  limit: null,
   checked: 0,
   eligible: 0,
   drafted: 0,

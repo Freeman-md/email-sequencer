@@ -67,7 +67,11 @@ Stop cancels a pending wait. An in-flight send is allowed to finish and its resu
 
 ## Prepare Follow-Ups
 
-The dashboard's **Prepare Follow-Ups** button creates Airtable Drafts only. Review those records, then start the existing sequencer separately. Preparation runs in the same persistent Node process, returns immediately and reports progress through polling. Closing the browser does not cancel preparation. Only one preparation can run at a time.
+The dashboard's **Prepare Follow-Ups** button creates Airtable Drafts only. Review those records, then start the existing sequencer separately. Preparation runs in the same persistent Node process, returns immediately and reports progress through polling. Closing the browser does not cancel preparation. Only one preparation can run at a time. **Stop Preparation** cancels generation and prevents further work, while allowing an Airtable Draft save already started to settle. The run stays locked and shows Stopping until that request finishes; refresh preserves access to the server run and Stop control. A cancelled prospect is reported as skipped.
+
+When upgrading from the version without Stop support, restart the development server once. Turbopack can retain an old service instance across code reloads; the app will request a restart if that instance is active rather than replace its lock and allow overlapping preparation.
+
+Set the optional **Draft limit** to a positive whole number to cap successfully prepared Drafts per run. Leave it blank to process all candidates. Skips and failed attempts do not consume the limit; reaching it prevents another candidate read or generation. The active limit is shown after refresh and cannot change mid-run. Stop preserves already saved Drafts; starting again checks them normally for duplicates.
 
 ### Setup and data contract
 

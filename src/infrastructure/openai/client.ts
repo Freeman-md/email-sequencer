@@ -9,7 +9,7 @@ export class OpenAIClient implements ITextGenerator {
     private readonly request: typeof fetch = fetch,
   ) {}
 
-  async generate(instructions: string, input: string) {
+  async generate(instructions: string, input: string, signal?: AbortSignal) {
     if (!this.config.apiKey || !this.config.model)
       throw new Error(
         'Configure EMAIL_SEQUENCER_OPENAI_API_KEY and EMAIL_SEQUENCER_OPENAI_MODEL for follow-up generation.',
@@ -34,7 +34,9 @@ export class OpenAIClient implements ITextGenerator {
             max_output_tokens: 2048,
             store: false,
           }),
-          signal: AbortSignal.timeout(60000),
+          signal: signal
+            ? AbortSignal.any([signal, AbortSignal.timeout(60000)])
+            : AbortSignal.timeout(60000),
           redirect: 'error',
         },
       );

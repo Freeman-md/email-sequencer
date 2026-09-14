@@ -284,9 +284,11 @@ test('prepares drafts, protects command results from stale polling and displays 
     if (route.request().method() === 'POST') {
       mutations++;
       expect(route.request().url()).toContain('/prepare');
+      expect(route.request().postDataJSON()).toEqual({ limit: 1 });
       state = {
         ...state,
         status: 'running',
+        limit: 1,
         startedAt: '2026-09-12T12:00:00Z',
       };
       await route.fulfill({ json: state, status: 202 });
@@ -300,10 +302,19 @@ test('prepares drafts, protects command results from stale polling and displays 
   });
   await page.goto('/');
   await pending;
+  await page.getByLabel('Draft limit (optional)').fill('0');
+  await expect(
+    page.getByRole('button', { name: 'Prepare Follow-Ups' }),
+  ).toBeDisabled();
+  await page.getByLabel('Draft limit (optional)').fill('1');
   await page.getByRole('button', { name: 'Prepare Follow-Ups' }).click();
-  await expect(page.getByRole('button', { name: 'Preparing…' })).toBeDisabled();
+  await expect(
+    page.getByRole('button', { name: 'Stop Preparation' }),
+  ).toBeEnabled();
   await release();
-  await expect(page.getByRole('button', { name: 'Preparing…' })).toBeDisabled();
+  await expect(
+    page.getByRole('button', { name: 'Stop Preparation' }),
+  ).toBeEnabled();
   state = {
     ...state,
     status: 'completed',
@@ -319,6 +330,7 @@ test('prepares drafts, protects command results from stale polling and displays 
   await page.getByText('Skip reasons', { exact: true }).click();
   await expect(page.getByText('Missing Gmail Thread ID: 1')).toBeVisible();
   expect(mutations).toBe(1);
+  await expect(page.getByText(/Draft limit reached/)).toBeVisible();
   await page.setViewportSize({ width: 390, height: 1000 });
   await page
     .getByRole('heading', { name: 'Follow-Ups', exact: true })
@@ -332,4 +344,61 @@ test('prepares drafts, protects command results from stale polling and displays 
       () => document.documentElement.scrollWidth <= window.innerWidth,
     ),
   ).toBe(true);
+});
+
+test('refresh retains the preparation limit and Stop, and stale polls cannot undo stopping', async ({
+  page,
+}) => {
+  let state = {
+    ...initialPreparationState(),
+    status: 'running' as 'running' | 'stopping' | 'stopped',
+    limit: 5,
+    checked: 2,
+    drafted: 1,
+    startedAt: '2026-09-12T12:00:00Z',
+  };
+  let hold = false;
+  let release!: () => Promise<void>;
+  let received!: () => void;
+  const pending = new Promise<void>((resolve) => {
+    received = resolve;
+  });
+  await page.route('**/api/sequencer/**', (route) =>
+    route.fulfill({ json: fixture() }),
+  );
+  await page.route('**/api/follow-ups/**', async (route) => {
+    if (route.request().method() === 'POST') {
+      expect(route.request().url()).toContain('/stop');
+      state = { ...state, status: 'stopping' };
+      await route.fulfill({ json: state, status: 202 });
+    } else if (hold) {
+      hold = false;
+      const old = { ...state };
+      release = () => route.fulfill({ json: old });
+      received();
+    } else await route.fulfill({ json: state });
+  });
+  await page.goto('/');
+  await expect(
+    page.getByRole('button', { name: 'Stop Preparation' }),
+  ).toBeEnabled();
+  await page.reload();
+  await expect(
+    page.getByRole('button', { name: 'Stop Preparation' }),
+  ).toBeEnabled();
+  await expect(page.getByLabel('Draft limit (optional)')).toHaveValue('5');
+  await expect(page.getByLabel('Draft limit (optional)')).toBeDisabled();
+  hold = true;
+  await pending;
+  await page.getByRole('button', { name: 'Stop Preparation' }).click();
+  await expect(page.getByRole('button', { name: 'Stopping…' })).toBeDisabled();
+  await release();
+  await expect(page.getByRole('button', { name: 'Stopping…' })).toBeDisabled();
+  state = { ...state, status: 'stopped' };
+  await expect(
+    page.getByText(/Preparation stopped · Checked: 2/),
+  ).toBeVisible();
+  await expect(
+    page.getByRole('button', { name: 'Prepare Follow-Ups' }),
+  ).toBeEnabled();
 });

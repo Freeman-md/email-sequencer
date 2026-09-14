@@ -205,7 +205,9 @@ function setup() {
   return { service, prospects, interactions, campaigns, generator };
 }
 async function finished(service: FollowUpsService) {
-  await vi.waitFor(() => expect(service.snapshot().status).not.toBe('running'));
+  await vi.waitFor(() =>
+    expect(['running', 'stopping']).not.toContain(service.snapshot().status),
+  );
 }
 
 describe('preparation workflow', () => {
@@ -240,6 +242,7 @@ describe('preparation workflow', () => {
         history: [initial],
         due: expect.objectContaining({ step: FOLLOW_UP_STEPS[0] }),
       }),
+      expect.any(AbortSignal),
     );
     service.start();
     await finished(service);
@@ -288,4 +291,133 @@ describe('preparation workflow', () => {
     expect(interactions.createDraft).toHaveBeenCalledTimes(2);
     expect(JSON.stringify(service.snapshot())).not.toContain('private');
   });
+});
+
+describe('preparation stop and limits', () => {
+  it('limits confirmed drafts, without counting skips or reading the next page', async () => {
+    const { service, prospects, interactions, generator } = setup();
+    prospects.page.mockResolvedValue({
+      ids: ['recSkip', 'recReady', 'recUnused'],
+      offset: 'next',
+    });
+    prospects.findById.mockResolvedValueOnce({ ...prospect, email: '' });
+    service.start(1);
+    await finished(service);
+    expect(service.snapshot()).toMatchObject({
+      status: 'completed',
+      limit: 1,
+      checked: 2,
+      drafted: 1,
+      skipped: 1,
+    });
+    expect(prospects.page).toHaveBeenCalledTimes(1);
+    expect(generator.generate).toHaveBeenCalledTimes(1);
+    expect(interactions.createDraft).toHaveBeenCalledTimes(1);
+  });
+
+  it('rejects invalid limits without starting any work', () => {
+    const { service, prospects } = setup();
+    for (const limit of [
+      0,
+      -1,
+      1.5,
+      NaN,
+      Infinity,
+      Number.MAX_SAFE_INTEGER + 1,
+    ]) {
+      expect(() => service.start(limit)).toThrow('positive whole number');
+    }
+    expect(prospects.page).not.toHaveBeenCalled();
+    expect(service.snapshot().status).toBe('idle');
+  });
+
+  it('stops during a candidate read without beginning a prospect', async () => {
+    const { service, prospects } = setup();
+    let resolve!: (page: { ids: string[] }) => void;
+    prospects.page.mockReturnValueOnce(
+      new Promise((done) => {
+        resolve = done;
+      }),
+    );
+    service.start();
+    expect(service.stop().status).toBe('stopping');
+    expect(() => service.start()).toThrow('already running');
+    resolve({ ids: [prospect.id] });
+    await finished(service);
+    expect(service.snapshot()).toMatchObject({ status: 'stopped', checked: 0 });
+    expect(prospects.findById).not.toHaveBeenCalled();
+  });
+
+  it('cancels generation, creates no draft and allows a fresh run after stopping', async () => {
+    const { service, generator, interactions } = setup();
+    generator.generate.mockImplementation(
+      (_context, signal: AbortSignal) =>
+        new Promise((_resolve, reject) => {
+          signal.addEventListener(
+            'abort',
+            () => reject(new Error('Cancelled')),
+            { once: true },
+          );
+        }),
+    );
+    service.start();
+    await vi.waitFor(() => expect(generator.generate).toHaveBeenCalledTimes(1));
+    expect(service.stop().status).toBe('stopping');
+    expect(() => service.start()).toThrow('already running');
+    await finished(service);
+    expect(service.snapshot()).toMatchObject({
+      status: 'stopped',
+      drafted: 0,
+      skipped: 1,
+      errorCount: 0,
+    });
+    expect(interactions.createDraft).not.toHaveBeenCalled();
+    expect(generator.generate.mock.calls[0]?.[1].aborted).toBe(true);
+    generator.generate.mockResolvedValue('A fresh follow-up.');
+    service.start(1);
+    await finished(service);
+    expect(service.snapshot()).toMatchObject({
+      status: 'completed',
+      drafted: 1,
+      skipped: 0,
+    });
+  });
+
+  it.each([false, true])(
+    'settles an in-flight draft write before releasing the lock (failure: %s)',
+    async (failure) => {
+      const { service, prospects, interactions } = setup();
+      prospects.page.mockResolvedValue({
+        ids: [prospect.id, 'recNext'],
+        offset: 'next',
+      });
+      let resolve!: () => void;
+      let reject!: (error: Error) => void;
+      interactions.createDraft.mockReturnValueOnce(
+        new Promise<void>((done, fail) => {
+          resolve = done;
+          reject = fail;
+        }),
+      );
+      service.start();
+      await vi.waitFor(() =>
+        expect(interactions.createDraft).toHaveBeenCalledTimes(1),
+      );
+      expect(service.stop().status).toBe('stopping');
+      expect(service.stop().status).toBe('stopping');
+      expect(() => service.start()).toThrow('already running');
+      if (failure) reject(new Error('Unknown write outcome'));
+      else resolve();
+      await finished(service);
+      expect(service.snapshot()).toMatchObject({
+        status: 'stopped',
+        drafted: failure ? 0 : 1,
+        errorCount: failure ? 1 : 0,
+        checked: 1,
+      });
+      expect(prospects.page).toHaveBeenCalledTimes(1);
+      expect(interactions.createDraft).toHaveBeenCalledTimes(1);
+      expect(service.stop().status).toBe('stopped');
+    },
+  );
 });

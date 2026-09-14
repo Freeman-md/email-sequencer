@@ -11,17 +11,28 @@ export class FollowUpsClient implements IFollowUpsClient {
     return this.read('state', 'GET', signal);
   }
 
-  prepare(signal: AbortSignal) {
-    return this.read('prepare', 'POST', signal);
+  prepare(signal: AbortSignal, limit?: number) {
+    return this.read('prepare', 'POST', signal, { limit });
+  }
+
+  stop(signal: AbortSignal) {
+    return this.read('stop', 'POST', signal);
   }
 
   private async read(
     action: string,
     method: string,
     signal: AbortSignal,
+    body?: object,
   ): Promise<PreparationState> {
     const response = await this.request(`/api/follow-ups/${action}`, {
       method,
+      ...(body
+        ? {
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(body),
+          }
+        : {}),
       cache: 'no-store',
       signal: AbortSignal.any([signal, AbortSignal.timeout(15000)]),
     });
