@@ -1,9 +1,8 @@
 import 'server-only';
 
 import { getInfrastructure } from '@/infrastructure';
+import { composeOutreachRepositories } from '@/modules/outreach/server';
 
-import { InteractionsRepository } from './repositories/interactions.repository';
-import { ProspectsRepository } from './repositories/prospects.repository';
 import { SequencerRuntime } from './runtime/sequencer-runtime';
 import { ConnectionsService } from './services/connections.service';
 import { SequencerService } from './services/sequencer.service';
@@ -11,8 +10,7 @@ import { SequencerService } from './services/sequencer.service';
 function composeServices() {
   const { airtable, gmail } = getInfrastructure();
   const runtime = new SequencerRuntime();
-  const interactions = new InteractionsRepository(airtable);
-  const prospects = new ProspectsRepository(airtable);
+  const { interactions, prospects } = composeOutreachRepositories(airtable);
   const connections = new ConnectionsService(
     interactions,
     prospects,

@@ -1,5 +1,6 @@
-import { Dashboard } from '@/features/sequencer';
 import { getSequencerServices } from '@/features/sequencer/server';
+
+import { OutreachDashboard } from './components/OutreachDashboard';
 
 export const dynamic = 'force-dynamic';
 export const runtime = 'nodejs';
@@ -20,7 +21,7 @@ export default async function Page({
   }
 
   return (
-    <Dashboard
+    <OutreachDashboard
       initial={initial}
       initialError={initialError}
       oauthFailed={params.gmail === 'failed'}

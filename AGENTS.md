@@ -15,6 +15,15 @@ The skill owns architecture, responsibility boundaries, dependency design, scope
 - Infrastructure filenames use their directory context: `client.ts`, `service.ts`, `token-store.ts`, `schemas.ts`. Exported classes retain descriptive names.
 - Preserve documented configuration names, including `EMAIL_SEQUENCER_GOOGLE_*`, which avoid collisions with global Google configuration.
 
+## Outreach ownership
+
+- `features/sequencer` and `features/follow-ups` own independent workflows and UI. Compose their public components in the app layer; features must not import one another.
+- `modules/outreach` owns Prospect, Interaction and Campaign persistence, entity contracts, storage mapping and field names. Feature services consume module-owned narrow repository interfaces; only composition obtains concrete repositories through `modules/outreach/server`.
+- Keep Airtable HTTP/pacing and generic record parsing in infrastructure. Domain modules must not import features; infrastructure must not import domain modules or features. ESLint enforces these directions.
+- Use plural entity directories and singular repository/mapper names (`prospects/airtable/prospect.repository.ts`, `ProspectRepository`, `IProspectRepository`). Keep workflow state and API/view contracts in their feature.
+- Use explicit projections when workflows need different fields. Reuse common mapping without making sending validate preparation-only research fields. Validate Do Not Contact before sending existing drafts.
+- Keep repositories stateless and injected; preserve shared transport pacing and existing workflow/OAuth lifetimes. No generic repository base or pass-through entity services.
+
 ## Operational safeguards
 
 - Never read, open, print, parse, search, copy or otherwise inspect `.env`, `.env.local`, token files or other files containing secrets. Non-secret `.env.example` and `.env.template` files are allowed. Do not dump environment variables or expose credentials in output, logs, tests or commits.

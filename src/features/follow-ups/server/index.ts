@@ -1,1 +1,1 @@
-export { getFollowUpsService } from './composition';
+export { getFollowUpPreparationService } from './composition';

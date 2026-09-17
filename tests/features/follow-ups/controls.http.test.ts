@@ -5,7 +5,7 @@ import { POST as stop } from '@/app/api/follow-ups/stop/route';
 
 const service = vi.hoisted(() => ({ start: vi.fn(), stop: vi.fn() }));
 vi.mock('@/features/follow-ups/server', () => ({
-  getFollowUpsService: () => service,
+  getFollowUpPreparationService: () => service,
 }));
 vi.mock('@/infrastructure/config/env', () => ({
   appOrigin: () => 'http://localhost:3000',

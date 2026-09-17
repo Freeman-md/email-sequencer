@@ -4,16 +4,16 @@ import type { Connection } from '../../types';
 import type { ConnectionState } from '../../types';
 import type { IConnectionsService } from '../interfaces/connections-service.interface';
 import type { GmailConnection } from '../interfaces/gmail-connection.interface';
-import type { IInteractionsRepository } from '../interfaces/interactions-repository.interface';
-import type { IProspectsRepository } from '../interfaces/prospects-repository.interface';
 import type { SequencerRuntime } from '../runtime/sequencer-runtime';
+import type { IDraftQueueRepository } from '@/modules/outreach/interactions';
+import type { IProspectContactRepository } from '@/modules/outreach/prospects';
 
 export class ConnectionsService implements IConnectionsService {
   private cache?: { expires: number; value: Promise<ConnectionState> };
 
   constructor(
-    private readonly interactions: IInteractionsRepository,
-    private readonly prospects: IProspectsRepository,
+    private readonly interactions: IDraftQueueRepository,
+    private readonly prospects: IProspectContactRepository,
     private readonly gmail: GmailConnection,
     private readonly runtime: SequencerRuntime,
     private readonly now: () => number = Date.now,

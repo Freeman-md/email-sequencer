@@ -3,9 +3,9 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { SequencerRuntime } from '@/features/sequencer/server/runtime/sequencer-runtime';
 import { SequencerService } from '@/features/sequencer/server/services/sequencer.service';
 
-import type { InteractionRecord } from '@/features/sequencer/server/types';
-import type { Interaction } from '@/features/sequencer/server/types';
+import type { Interaction } from '@/features/sequencer/server/types/interaction';
 import type { SendResult } from '@/infrastructure/email/types/send-result';
+import type { DraftCandidate } from '@/modules/outreach/interactions';
 
 const startedAt = '2026-09-09T12:00:00.000Z';
 const interaction: Interaction = {
@@ -19,7 +19,7 @@ const interaction: Interaction = {
   message: 'Hello Maya,\nHere is the message.',
   createdAt: '2026-09-09T08:00:00.000Z',
 };
-const candidate: InteractionRecord = {
+const candidate: DraftCandidate = {
   id: interaction.id,
   type: 'Initial Message',
   gmailThreadId: '',
@@ -36,8 +36,11 @@ const flush = async () => {
   for (let i = 0; i < 12; i++) await Promise.resolve();
 };
 function setup() {
-  const next = vi.fn().mockResolvedValueOnce(candidate).mockResolvedValue(null);
-  const complete = vi.fn().mockResolvedValue(undefined);
+  const findNextDraft = vi
+    .fn()
+    .mockResolvedValueOnce(candidate)
+    .mockResolvedValue(null);
+  const confirmSent = vi.fn().mockResolvedValue(undefined);
   const send = vi.fn<() => Promise<SendResult>>().mockResolvedValue({
     kind: 'confirmed',
     gmailMessageId: 'gmail-id',
@@ -45,7 +48,7 @@ function setup() {
     sentAt: '2026-09-09T12:00:01.000Z',
   });
   const check = vi.fn().mockResolvedValue(undefined);
-  const findById = vi.fn().mockResolvedValue({
+  const findContactById = vi.fn().mockResolvedValue({
     id: 'recProspect',
     name: interaction.prospect,
     company: interaction.company,
@@ -54,15 +57,15 @@ function setup() {
   const runtime = new SequencerRuntime();
 
   return {
-    findById,
+    findContactById,
     runtime,
-    next,
-    complete,
+    findNextDraft,
+    confirmSent,
     send,
     check,
     runner: new SequencerService(
-      { next, complete, checkConnection: vi.fn() },
-      { findById, checkConnection: vi.fn() },
+      { findNextDraft, confirmSent, checkConnection: vi.fn() },
+      { findContactById, checkConnection: vi.fn() },
       { send },
       { requireReady: check, getState: vi.fn(), connectGmail: vi.fn() },
       runtime,
@@ -77,13 +80,12 @@ afterEach(() => vi.useRealTimers());
 
 describe('one-at-a-time run lifecycle', () => {
   it('fixes runStartedAt and waits the full interval before querying again', async () => {
-    const { runner, next, complete, send } = setup();
+    const { runner, findNextDraft, confirmSent, send } = setup();
     runner.start(300);
     await flush();
-    expect(next).toHaveBeenCalledTimes(1);
+    expect(findNextDraft).toHaveBeenCalledTimes(1);
     expect(send).toHaveBeenCalledWith(interaction);
-    expect(complete).toHaveBeenCalledWith(interaction.id, {
-      kind: 'confirmed',
+    expect(confirmSent).toHaveBeenCalledWith(interaction.id, {
       sentAt: '2026-09-09T12:00:01.000Z',
       gmailMessageId: 'gmail-id',
       gmailThreadId: 'thread-id',
@@ -95,10 +97,12 @@ describe('one-at-a-time run lifecycle', () => {
       runStartedAt: startedAt,
     });
     await vi.advanceTimersByTimeAsync(299_999);
-    expect(next).toHaveBeenCalledTimes(1);
+    expect(findNextDraft).toHaveBeenCalledTimes(1);
     await vi.advanceTimersByTimeAsync(1);
-    expect(next).toHaveBeenCalledTimes(2);
-    expect(next.mock.calls.every((call) => call[0] === startedAt)).toBe(true);
+    expect(findNextDraft).toHaveBeenCalledTimes(2);
+    expect(
+      findNextDraft.mock.calls.every((call) => call[0] === startedAt),
+    ).toBe(true);
     expect(runner.snapshot()).toMatchObject({
       status: 'completed',
       runStartedAt: startedAt,
@@ -106,7 +110,7 @@ describe('one-at-a-time run lifecycle', () => {
   });
 
   it('does not write Completed until Gmail confirms', async () => {
-    const { runner, send, complete } = setup();
+    const { runner, send, confirmSent } = setup();
     let resolveSend!: (result: SendResult) => void;
     send.mockReturnValueOnce(
       new Promise((resolve) => {
@@ -115,7 +119,7 @@ describe('one-at-a-time run lifecycle', () => {
     );
     runner.start(300);
     await flush();
-    expect(complete).not.toHaveBeenCalled();
+    expect(confirmSent).not.toHaveBeenCalled();
     expect(runner.snapshot().phase).toBe('sending');
     resolveSend({
       kind: 'confirmed',
@@ -124,8 +128,7 @@ describe('one-at-a-time run lifecycle', () => {
       sentAt: startedAt,
     });
     await flush();
-    expect(complete).toHaveBeenCalledExactlyOnceWith(interaction.id, {
-      kind: 'confirmed',
+    expect(confirmSent).toHaveBeenCalledExactlyOnceWith(interaction.id, {
       sentAt: startedAt,
       gmailMessageId: 'gmail-id',
       gmailThreadId: 'thread-id',
@@ -135,15 +138,15 @@ describe('one-at-a-time run lifecycle', () => {
   });
 
   it('leaves definite failures untouched and excludes them for the rest of the run', async () => {
-    const { runner, next, send, complete } = setup();
-    next.mockImplementation(async (_cutoff, excluded: Set<string>) =>
+    const { runner, findNextDraft, send, confirmSent } = setup();
+    findNextDraft.mockImplementation(async (_cutoff, excluded: Set<string>) =>
       excluded.has(interaction.id) ? null : candidate,
     );
     send.mockResolvedValue({ kind: 'definite', message: 'Rejected' });
     runner.start(1);
     await vi.runAllTimersAsync();
     expect(send).toHaveBeenCalledTimes(1);
-    expect(complete).not.toHaveBeenCalled();
+    expect(confirmSent).not.toHaveBeenCalled();
     expect(runner.snapshot()).toMatchObject({
       status: 'completed',
       sentCount: 0,
@@ -156,13 +159,13 @@ describe('one-at-a-time run lifecycle', () => {
   });
 
   it('stops on an uncertain outcome without a retry or write', async () => {
-    const { runner, send, next, complete } = setup();
+    const { runner, send, findNextDraft, confirmSent } = setup();
     send.mockResolvedValue({ kind: 'uncertain', message: 'Timed out' });
     runner.start(300);
     await vi.runAllTimersAsync();
-    expect(next).toHaveBeenCalledTimes(1);
+    expect(findNextDraft).toHaveBeenCalledTimes(1);
     expect(send).toHaveBeenCalledTimes(1);
-    expect(complete).not.toHaveBeenCalled();
+    expect(confirmSent).not.toHaveBeenCalled();
     expect(runner.snapshot()).toMatchObject({
       status: 'error',
       current: { id: interaction.id },
@@ -185,11 +188,11 @@ describe('one-at-a-time run lifecycle', () => {
   });
 
   it('stops for reconciliation if Gmail succeeds but Airtable write fails', async () => {
-    const { runner, complete, next } = setup();
-    complete.mockRejectedValue(new Error('Unavailable'));
+    const { runner, confirmSent, findNextDraft } = setup();
+    confirmSent.mockRejectedValue(new Error('Unavailable'));
     runner.start(1);
     await vi.runAllTimersAsync();
-    expect(next).toHaveBeenCalledTimes(1);
+    expect(findNextDraft).toHaveBeenCalledTimes(1);
     expect(runner.snapshot()).toMatchObject({
       status: 'error',
       sentCount: 1,
@@ -215,12 +218,12 @@ describe('one-at-a-time run lifecycle', () => {
   });
 
   it('cancels the interval without fetching another record', async () => {
-    const { runner, next } = setup();
+    const { runner, findNextDraft } = setup();
     runner.start(300);
     await flush();
     runner.stop();
     await vi.runAllTimersAsync();
-    expect(next).toHaveBeenCalledTimes(1);
+    expect(findNextDraft).toHaveBeenCalledTimes(1);
     expect(runner.snapshot()).toMatchObject({
       status: 'idle',
       phase: 'stopped',
@@ -229,7 +232,7 @@ describe('one-at-a-time run lifecycle', () => {
   });
 
   it('finishes an in-flight send when stopped, then releases the lock', async () => {
-    const { runner, send, complete, next } = setup();
+    const { runner, send, confirmSent, findNextDraft } = setup();
     let finish!: (result: SendResult) => void;
     send.mockReturnValue(
       new Promise((resolve) => {
@@ -247,14 +250,14 @@ describe('one-at-a-time run lifecycle', () => {
       sentAt: startedAt,
     });
     await flush();
-    expect(complete).toHaveBeenCalledTimes(1);
-    expect(next).toHaveBeenCalledTimes(1);
+    expect(confirmSent).toHaveBeenCalledTimes(1);
+    expect(findNextDraft).toHaveBeenCalledTimes(1);
     expect(runner.isActive()).toBe(false);
   });
 
   it('refuses a record newer than the run cutoff', async () => {
-    const { runner, next, send } = setup();
-    next.mockReset().mockResolvedValue({
+    const { runner, findNextDraft, send } = setup();
+    findNextDraft.mockReset().mockResolvedValue({
       ...candidate,
       createdAt: '2026-09-09T12:00:00.001Z',
     });
@@ -265,12 +268,12 @@ describe('one-at-a-time run lifecycle', () => {
   });
 
   it('a new run has a new cutoff and can revisit prior definite failures', async () => {
-    const { runner, next, send } = setup();
+    const { runner, findNextDraft, send } = setup();
     send.mockResolvedValue({ kind: 'definite', message: 'Rejected' });
     runner.start(1);
     await vi.runAllTimersAsync();
     vi.setSystemTime(new Date('2026-09-09T13:00:00.000Z'));
-    next.mockResolvedValueOnce(candidate);
+    findNextDraft.mockResolvedValueOnce(candidate);
     runner.start(1);
     await vi.runAllTimersAsync();
     expect(send).toHaveBeenCalledTimes(2);
@@ -278,13 +281,13 @@ describe('one-at-a-time run lifecycle', () => {
   });
 
   it('keeps missing-email candidates excluded after subsequent sends', async () => {
-    const { runner, next, findById, send } = setup();
-    next
+    const { runner, findNextDraft, findContactById, send } = setup();
+    findNextDraft
       .mockReset()
       .mockResolvedValueOnce({ ...candidate, id: 'recNoEmail' })
       .mockResolvedValueOnce(candidate)
       .mockResolvedValue(null);
-    findById.mockResolvedValueOnce({
+    findContactById.mockResolvedValueOnce({
       id: 'recProspect',
       name: '',
       company: '',
@@ -295,16 +298,16 @@ describe('one-at-a-time run lifecycle', () => {
     await vi.runAllTimersAsync();
 
     expect(send).toHaveBeenCalledTimes(1);
-    expect(next.mock.calls[2]?.[1]).toEqual(
+    expect(findNextDraft.mock.calls[2]?.[1]).toEqual(
       new Set(['recNoEmail', candidate.id]),
     );
     expect(runner.snapshot().status).toBe('completed');
   });
 
   it('stops without sending if cancellation arrives during the Prospect read', async () => {
-    const { runner, findById, send } = setup();
+    const { runner, findContactById, send } = setup();
     let finish!: (value: unknown) => void;
-    findById.mockReturnValueOnce(
+    findContactById.mockReturnValueOnce(
       new Promise((resolve) => {
         finish = resolve;
       }),
@@ -326,15 +329,15 @@ describe('one-at-a-time run lifecycle', () => {
   });
 
   it('does not choose an arbitrary recipient when multiple Prospects are linked', async () => {
-    const { runner, next, findById, send } = setup();
-    next
+    const { runner, findNextDraft, findContactById, send } = setup();
+    findNextDraft
       .mockReset()
       .mockResolvedValue({ ...candidate, prospectIds: ['recOne', 'recTwo'] });
 
     runner.start(1);
     await flush();
 
-    expect(findById).not.toHaveBeenCalled();
+    expect(findContactById).not.toHaveBeenCalled();
     expect(send).not.toHaveBeenCalled();
     expect(runner.snapshot().errors[0]?.message).toContain('exactly one');
   });
@@ -345,4 +348,37 @@ describe('one-at-a-time run lifecycle', () => {
       expect(() => setup().runner.start(interval)).toThrow('Interval Seconds');
     },
   );
+});
+
+it('rechecks Do Not Contact for an existing draft and continues without sending or completing it', async () => {
+  const { runner, findNextDraft, findContactById, send, confirmSent } = setup();
+  findNextDraft
+    .mockReset()
+    .mockResolvedValueOnce(candidate)
+    .mockResolvedValueOnce({ ...candidate, id: 'recAllowed' })
+    .mockResolvedValue(null);
+  findContactById.mockResolvedValueOnce({
+    id: 'recProspect',
+    name: 'Maya',
+    company: 'Northstar',
+    email: 'maya@example.com',
+    doNotContact: true,
+  });
+  runner.start(1);
+  await flush();
+  expect(send).toHaveBeenCalledTimes(1);
+  expect(send).toHaveBeenCalledWith(
+    expect.objectContaining({ id: 'recAllowed' }),
+  );
+  expect(confirmSent).toHaveBeenCalledTimes(1);
+  expect(confirmSent).toHaveBeenCalledWith('recAllowed', expect.anything());
+  expect(runner.snapshot().errors).toContainEqual(
+    expect.objectContaining({
+      interactionId: candidate.id,
+      message: expect.stringContaining('Do Not Contact'),
+    }),
+  );
+  expect(findNextDraft.mock.calls[1]?.[1]).toEqual(new Set([candidate.id]));
+  runner.stop();
+  await flush();
 });

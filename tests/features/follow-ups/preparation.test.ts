@@ -2,16 +2,14 @@ import { describe, expect, it, vi } from 'vitest';
 
 import { FOLLOW_UP_STEPS } from '@/features/follow-ups/constants/steps';
 import { assessFollowUp } from '@/features/follow-ups/server/services/eligibility';
-import { FollowUpsService } from '@/features/follow-ups/server/services/follow-ups.service';
+import { FollowUpPreparationService } from '@/features/follow-ups/server/services/follow-up-preparation.service';
 import { TextGenerationError } from '@/infrastructure/text-generation/error';
 
-import type {
-  Prospect,
-  HistoryInteraction,
-} from '@/features/follow-ups/server/types';
+import type { HistoryInteraction } from '@/modules/outreach/interactions';
+import type { ProspectContext } from '@/modules/outreach/prospects';
 
 const now = Date.parse('2026-09-12T12:00:00Z');
-const prospect: Prospect = {
+const prospect: ProspectContext = {
   id: 'recProspect',
   name: 'Test',
   email: 'test@example.com',
@@ -177,24 +175,24 @@ describe('follow-up eligibility', () => {
 
 function setup() {
   const prospects = {
-    page: vi.fn().mockResolvedValue({ ids: [prospect.id] }),
-    findById: vi.fn().mockResolvedValue(prospect),
+    pageWithInteractions: vi.fn().mockResolvedValue({ ids: [prospect.id] }),
+    findContextById: vi.fn().mockResolvedValue(prospect),
   };
   const interactions = {
-    history: vi.fn().mockResolvedValue([initial]),
-    createDraft: vi.fn().mockResolvedValue(undefined),
+    findHistoryByIds: vi.fn().mockResolvedValue([initial]),
+    createFollowUpDraft: vi.fn().mockResolvedValue(undefined),
   };
   const campaigns = {
     findById: vi.fn().mockResolvedValue({
       id: 'recCampaign',
       name: 'Relevant offer',
-      guidance: { Offer: 'Existing offer' },
+      guidance: { offer: 'Existing offer' },
     }),
   };
   const generator = {
     generate: vi.fn().mockResolvedValue('A short, relevant follow-up.'),
   };
-  const service = new FollowUpsService(
+  const service = new FollowUpPreparationService(
     prospects,
     interactions,
     campaigns,
@@ -205,7 +203,7 @@ function setup() {
 
   return { service, prospects, interactions, campaigns, generator };
 }
-async function finished(service: FollowUpsService) {
+async function finished(service: FollowUpPreparationService) {
   await vi.waitFor(() =>
     expect(['running', 'stopping']).not.toContain(service.snapshot().status),
   );
@@ -214,8 +212,8 @@ async function finished(service: FollowUpsService) {
 describe('preparation workflow', () => {
   it('locks concurrent runs, saves only a draft, and suppresses duplicates on the next run', async () => {
     const { service, interactions, generator, prospects } = setup();
-    interactions.createDraft.mockImplementation(async () => {
-      interactions.history.mockResolvedValue([
+    interactions.createFollowUpDraft.mockImplementation(async () => {
+      interactions.findHistoryByIds.mockResolvedValue([
         initial,
         { ...followup, status: 'Draft', sentAt: '', gmailMessageId: '' },
       ]);
@@ -229,13 +227,13 @@ describe('preparation workflow', () => {
       drafted: 1,
       skipped: 0,
     });
-    expect(interactions.createDraft).toHaveBeenCalledWith({
+    expect(interactions.createFollowUpDraft).toHaveBeenCalledWith({
       prospectId: prospect.id,
       subject: initial.subject,
       message: 'A short, relevant follow-up.',
       gmailThreadId: initial.gmailThreadId,
     });
-    expect(prospects.findById).toHaveBeenCalledTimes(2);
+    expect(prospects.findContextById).toHaveBeenCalledTimes(2);
     expect(generator.generate).toHaveBeenCalledWith(
       expect.objectContaining({
         prospect,
@@ -247,39 +245,41 @@ describe('preparation workflow', () => {
     );
     service.start();
     await finished(service);
-    expect(interactions.createDraft).toHaveBeenCalledTimes(1);
+    expect(interactions.createFollowUpDraft).toHaveBeenCalledTimes(1);
     expect(generator.generate).toHaveBeenCalledTimes(1);
     expect(service.snapshot().reasons['Existing Draft Follow-up']).toBe(1);
   });
   it('rechecks for a reply arriving during generation', async () => {
     const { service, interactions } = setup();
-    interactions.history.mockResolvedValueOnce([initial]).mockResolvedValue([
-      initial,
-      {
-        ...initial,
-        direction: 'Inbound',
-        receivedAt: '2026-09-12T11:00:00Z',
-      },
-    ]);
+    interactions.findHistoryByIds
+      .mockResolvedValueOnce([initial])
+      .mockResolvedValue([
+        initial,
+        {
+          ...initial,
+          direction: 'Inbound',
+          receivedAt: '2026-09-12T11:00:00Z',
+        },
+      ]);
     service.start();
     await finished(service);
-    expect(interactions.createDraft).not.toHaveBeenCalled();
+    expect(interactions.createFollowUpDraft).not.toHaveBeenCalled();
     expect(service.snapshot().reasons['Reply already received']).toBe(1);
   });
   it('continues across pages after generation and write failures without retrying either', async () => {
     const { service, prospects, generator, interactions } = setup();
-    prospects.page
+    prospects.pageWithInteractions
       .mockResolvedValueOnce({ ids: ['recFirst', 'recSecond'], offset: 'next' })
       .mockResolvedValueOnce({ ids: ['recThird'] });
     generator.generate.mockRejectedValueOnce(
       new Error('private provider error'),
     );
-    interactions.createDraft.mockRejectedValueOnce(
+    interactions.createFollowUpDraft.mockRejectedValueOnce(
       new Error('private write error'),
     );
     service.start();
     await finished(service);
-    expect(prospects.page).toHaveBeenLastCalledWith('next');
+    expect(prospects.pageWithInteractions).toHaveBeenLastCalledWith('next');
     expect(service.snapshot()).toMatchObject({
       status: 'completed',
       checked: 3,
@@ -289,7 +289,7 @@ describe('preparation workflow', () => {
       errorCount: 2,
     });
     expect(generator.generate).toHaveBeenCalledTimes(3);
-    expect(interactions.createDraft).toHaveBeenCalledTimes(2);
+    expect(interactions.createFollowUpDraft).toHaveBeenCalledTimes(2);
     expect(JSON.stringify(service.snapshot())).not.toContain('private');
   });
 });
@@ -297,11 +297,11 @@ describe('preparation workflow', () => {
 describe('preparation stop and limits', () => {
   it('limits confirmed drafts, without counting skips or reading the next page', async () => {
     const { service, prospects, interactions, generator } = setup();
-    prospects.page.mockResolvedValue({
+    prospects.pageWithInteractions.mockResolvedValue({
       ids: ['recSkip', 'recReady', 'recUnused'],
       offset: 'next',
     });
-    prospects.findById.mockResolvedValueOnce({ ...prospect, email: '' });
+    prospects.findContextById.mockResolvedValueOnce({ ...prospect, email: '' });
     service.start(1);
     await finished(service);
     expect(service.snapshot()).toMatchObject({
@@ -311,9 +311,9 @@ describe('preparation stop and limits', () => {
       drafted: 1,
       skipped: 1,
     });
-    expect(prospects.page).toHaveBeenCalledTimes(1);
+    expect(prospects.pageWithInteractions).toHaveBeenCalledTimes(1);
     expect(generator.generate).toHaveBeenCalledTimes(1);
-    expect(interactions.createDraft).toHaveBeenCalledTimes(1);
+    expect(interactions.createFollowUpDraft).toHaveBeenCalledTimes(1);
   });
 
   it('rejects invalid limits without starting any work', () => {
@@ -328,14 +328,14 @@ describe('preparation stop and limits', () => {
     ]) {
       expect(() => service.start(limit)).toThrow('positive whole number');
     }
-    expect(prospects.page).not.toHaveBeenCalled();
+    expect(prospects.pageWithInteractions).not.toHaveBeenCalled();
     expect(service.snapshot().status).toBe('idle');
   });
 
   it('stops during a candidate read without beginning a prospect', async () => {
     const { service, prospects } = setup();
     let resolve!: (page: { ids: string[] }) => void;
-    prospects.page.mockReturnValueOnce(
+    prospects.pageWithInteractions.mockReturnValueOnce(
       new Promise((done) => {
         resolve = done;
       }),
@@ -346,7 +346,7 @@ describe('preparation stop and limits', () => {
     resolve({ ids: [prospect.id] });
     await finished(service);
     expect(service.snapshot()).toMatchObject({ status: 'stopped', checked: 0 });
-    expect(prospects.findById).not.toHaveBeenCalled();
+    expect(prospects.findContextById).not.toHaveBeenCalled();
   });
 
   it('cancels generation, creates no draft and allows a fresh run after stopping', async () => {
@@ -372,7 +372,7 @@ describe('preparation stop and limits', () => {
       skipped: 1,
       errorCount: 0,
     });
-    expect(interactions.createDraft).not.toHaveBeenCalled();
+    expect(interactions.createFollowUpDraft).not.toHaveBeenCalled();
     expect(generator.generate.mock.calls[0]?.[1].aborted).toBe(true);
     generator.generate.mockResolvedValue('A fresh follow-up.');
     service.start(1);
@@ -388,13 +388,13 @@ describe('preparation stop and limits', () => {
     'settles an in-flight draft write before releasing the lock (failure: %s)',
     async (failure) => {
       const { service, prospects, interactions } = setup();
-      prospects.page.mockResolvedValue({
+      prospects.pageWithInteractions.mockResolvedValue({
         ids: [prospect.id, 'recNext'],
         offset: 'next',
       });
       let resolve!: () => void;
       let reject!: (error: Error) => void;
-      interactions.createDraft.mockReturnValueOnce(
+      interactions.createFollowUpDraft.mockReturnValueOnce(
         new Promise<void>((done, fail) => {
           resolve = done;
           reject = fail;
@@ -402,7 +402,7 @@ describe('preparation stop and limits', () => {
       );
       service.start();
       await vi.waitFor(() =>
-        expect(interactions.createDraft).toHaveBeenCalledTimes(1),
+        expect(interactions.createFollowUpDraft).toHaveBeenCalledTimes(1),
       );
       expect(service.stop().status).toBe('stopping');
       expect(service.stop().status).toBe('stopping');
@@ -416,8 +416,8 @@ describe('preparation stop and limits', () => {
         errorCount: failure ? 1 : 0,
         checked: 1,
       });
-      expect(prospects.page).toHaveBeenCalledTimes(1);
-      expect(interactions.createDraft).toHaveBeenCalledTimes(1);
+      expect(prospects.pageWithInteractions).toHaveBeenCalledTimes(1);
+      expect(interactions.createFollowUpDraft).toHaveBeenCalledTimes(1);
       expect(service.stop().status).toBe('stopped');
     },
   );
@@ -438,7 +438,7 @@ it('shows safe generation diagnostics without exposing unexpected provider error
       expect(message).toContain('quota');
       expect(message).toContain('req_test');
     }
-    expect(interactions.createDraft).not.toHaveBeenCalled();
+    expect(interactions.createFollowUpDraft).not.toHaveBeenCalled();
     expect(generator.generate).toHaveBeenCalledTimes(1);
   }
 });

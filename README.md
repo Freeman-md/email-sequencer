@@ -22,9 +22,9 @@ Create a [personal access token](https://airtable.com/create/tokens) with `data.
 Use the existing tables, adding the Gmail ID and received-time fields below:
 
 - Interactions (`tblqbyXiQs2ZAHTrH`): `Status`, `Direction`, `Channel`, `Subject`, `Message`, `Prospect`, `Created At`, `Sent At`, `Type`, `Gmail Message ID`, `Gmail Thread ID`, `Received At`.
-- Prospects (`tblVwsTybmO6xNsmY`): `Full Name`, `Company`, `Email`.
+- Prospects (`tblVwsTybmO6xNsmY`): `Full Name`, `Company`, `Email`, `Do Not Contact` (checkbox).
 
-Table IDs and field mappings are centralized in `src/infrastructure/airtable/constants.ts`. No schema-write scope is needed. Connection checks read zero records and validate access to both tables. Write access is verified when an actual confirmed send is saved, not by modifying real data during connection checks.
+Table IDs and field mappings are owned by each entity’s `airtable/fields.ts` under `src/modules/outreach`. No schema-write scope is needed. Connection checks read zero records and validate access to both tables. Write access is verified when an actual confirmed send is saved, not by modifying real data during connection checks.
 
 ### Google OAuth
 
@@ -92,7 +92,7 @@ Created records are Outbound / Email / Follow-up / Draft, preserving the origina
 
 The sequencer retrieves Gmail metadata, validates the conversation's recipient/subject and RFC Message-ID, and supplies `threadId`, `In-Reply-To` and `References` when sending a reply. Encoded subjects are decoded with `libmime`. Missing or unverifiable threading fails before submission instead of sending a standalone follow-up. See [Gmail's threading requirements](https://developers.google.com/workspace/gmail/api/guides/threads) and [metadata access](https://developers.google.com/workspace/gmail/api/reference/rest/v1/users.threads/get).
 
-Preparation is isolated under `src/features/follow-ups`: components render, the hook owns commands/polling, the API client owns browser transport, repositories own each entity's persistence, mappers translate records, and the service applies deterministic policy and coordinates generation. The OpenAI client remains in infrastructure and receives feature-owned prompts through a text-generation interface. It has no sending capability.
+Preparation is isolated under `src/features/follow-ups`: components render, the hook owns commands/polling, the API client owns browser transport, the service applies deterministic policy and coordinates generation. Both workflows use the entity repositories and projections owned by `src/modules/outreach`; no feature imports another feature. App-level `OutreachDashboard` composes their public panels. The OpenAI client remains in infrastructure and receives feature-owned prompts through a text-generation interface. It has no sending capability.
 
 For a manual test, use your own address and a Draft Initial Message. Send it through the sequencer and verify both Gmail IDs and Sent At in Airtable. Once its configured delay has elapsed, prepare a follow-up, inspect the Draft, then send it and check the original Gmail thread. To exercise this sooner in isolated test data, adjust the synthetic record's Sent At deliberately; do not alter production history. Verify a second preparation creates no duplicate and a logged inbound reply suppresses the next step.
 
@@ -127,19 +127,18 @@ Stop the sender and let any active preparation finish before deployments or shut
 
 `src/features/sequencer/server/index.ts` only exports the lazy composition entry point. `composition.ts` wires constructor-injected repository and service classes against interfaces and retains one runtime per process.
 
-- `repositories/`: separate Airtable reads and writes for Interactions and Prospects.
-- `mappers/`: validate Airtable field shapes and map records into server types.
+- Repositories and storage mappers live in `src/modules/outreach`, grouped by entity. Feature composition injects them through narrow contracts.
 - `services/`: sequence eligibility, recipient resolution, sending and saving; connection checks, caching and mailbox changes.
 - `runtime/`: run state, exclusions, cancellation, interruptible waits and the shared run/mailbox lock.
-- `interfaces/` and `types/`: dependency contracts and server data shapes. Feature-level `types/` contains shared summaries, run state and dashboard contracts; email bodies and Airtable-derived entities stay under server types.
+- `interfaces/` and `types/`: dependency contracts and server data shapes. Feature-level `types/` contains shared summaries, run state and dashboard contracts; resolved sending context stays under server types; entity and persistence projections belong to the outreach module.
 
 Prettier handles syntax formatting. ESLint enforces import grouping, type imports and spacing between methods and logical sections in infrastructure, the restructured server, shared feature types, their callers and focused tests. Run `npx eslint <files> --fix` followed by `npx prettier <files> --write` when editing those files.
 
 ## Frontend structure
 
-The feature barrel exports `Dashboard`. Component files use PascalCase and preserve the existing page layout.
+The sequencer feature barrel exports `SequencerPanel`. App-level `OutreachDashboard` composes it with the public follow-up panel, preserving the existing layout. Component files use PascalCase.
 
-- `components/`: page composition and presentation for the header, run status, current interaction, last sent and notices.
+- `components/`: sequencer presentation for the header, run status, current interaction, last sent and notices. Cross-feature page composition stays in `src/app/components/`.
 - `hooks/`: dashboard data and polling/command coordination, interval and review controls, and the server-aligned clock.
 - `api/client.ts`: browser requests to the existing sequencer routes through an injectable client interface.
 - `presenters/`: pure functions translating run phases into display content.
@@ -174,3 +173,13 @@ npm run build
 For browser verification, run `npx playwright install chromium` once, then `npm run test:ui` after a build. Browser tests intercept sequencer and follow-up requests and use synthetic data. Run builds/startup for verification in an isolated source copy without local environment or token files; browser interception does not protect server-side rendering from live services. Screenshots are saved under the ignored `output/playwright/` directory.
 
 Tests use fake Airtable and Gmail responses and never send real emails. No live Draft queue should be run for verification. The specification is [Final V1 Specification](https://app.notion.com/p/3d6b505dc852817b86d9f1c7fa54f4ee), structure is [Web Structure](https://app.notion.com/p/3d6b505dc852814a8bd2dac10149442c), and visual reference is [Paper](https://app.paper.design/file/01M23G0TF90V757KYHN9CXF6C7/1-0). While waiting, the UI shows the last processed Interaction rather than prefetching the next one; Notion's wait-then-fetch behaviour takes precedence over Paper's sample “next email” label.
+
+### Outreach data ownership
+
+`src/modules/outreach` owns Prospect, Interaction and Campaign contracts, Airtable repositories, field mappings and write confirmation. Entity directories are plural; repository and mapper filenames/classes are singular. Its `server.ts` exports repository composition only. Feature services receive narrow repository interfaces; transport, pacing, Gmail and OpenAI remain in infrastructure. Repositories have no workflow state or additional global cache.
+
+`ProspectContact` includes contact details and Do Not Contact; `ProspectContext` adds preparation research and links. `DraftCandidate` and `HistoryInteraction` similarly distinguish sending from history reads. Missing optional Airtable fields retain existing empty defaults; malformed populated fields fail at the boundary. Campaign guidance uses named application properties, independent of Airtable labels.
+
+Before sending an existing draft, the sequencer reads the prospect's current Do Not Contact flag. An opted-out prospect is reported as a definite rejection, the draft is unchanged, and the run continues. This is a pre-send check, not an atomic guarantee against a concurrent Airtable edit.
+
+After changing server composition, restart the server once active work has settled so process-cached services use the new implementations. Storage ownership does not change run locks, send confirmation or cancellation semantics.

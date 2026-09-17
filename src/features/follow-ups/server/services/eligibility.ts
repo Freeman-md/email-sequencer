@@ -1,10 +1,12 @@
 import { z } from 'zod';
 
 import type { FollowUpStep } from '../../constants/steps';
-import type { Prospect, HistoryInteraction, DueFollowUp } from '../types';
+import type { DueFollowUp } from '../types/follow-up';
+import type { HistoryInteraction } from '@/modules/outreach/interactions';
+import type { ProspectContext } from '@/modules/outreach/prospects';
 
 export function assessFollowUp(
-  prospect: Prospect,
+  prospect: ProspectContext,
   history: HistoryInteraction[],
   steps: readonly FollowUpStep[],
   now: number,

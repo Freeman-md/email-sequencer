@@ -1,6 +1,6 @@
 import { z } from 'zod';
 
-import { getFollowUpsService } from '@/features/follow-ups/server';
+import { getFollowUpPreparationService } from '@/features/follow-ups/server';
 import { apiError } from '@/infrastructure/http/api-error';
 import { requireSameOrigin } from '@/infrastructure/http/require-same-origin';
 
@@ -18,10 +18,13 @@ export async function POST(request: Request) {
         'Preparation limit must be a positive whole number, or left blank.',
       );
 
-    return Response.json(getFollowUpsService().start(parsed.data.limit), {
-      status: 202,
-      headers: { 'Cache-Control': 'no-store' },
-    });
+    return Response.json(
+      getFollowUpPreparationService().start(parsed.data.limit),
+      {
+        status: 202,
+        headers: { 'Cache-Control': 'no-store' },
+      },
+    );
   } catch (error) {
     return apiError(error);
   }

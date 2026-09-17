@@ -1,1 +1,1 @@
-export { Dashboard } from './components/Dashboard';
+export { SequencerPanel } from './components/SequencerPanel';

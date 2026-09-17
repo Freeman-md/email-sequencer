@@ -6,11 +6,11 @@ import { ConnectionsService } from '@/features/sequencer/server/services/connect
 function setup() {
   const runtime = new SequencerRuntime();
   const interactions = {
-    next: vi.fn(),
-    complete: vi.fn(),
+    findNextDraft: vi.fn(),
+    confirmSent: vi.fn(),
     checkConnection: vi.fn(),
   };
-  const prospects = { findById: vi.fn(), checkConnection: vi.fn() };
+  const prospects = { findContactById: vi.fn(), checkConnection: vi.fn() };
   const gmail = {
     checkConnection: vi
       .fn()

@@ -1,6 +1,6 @@
 import { afterEach, expect, it, vi } from 'vitest';
 
-import { getFollowUpsService } from '@/features/follow-ups/server/composition';
+import { getFollowUpPreparationService } from '@/features/follow-ups/server/composition';
 import { getInfrastructure } from '@/infrastructure';
 
 vi.mock('@/infrastructure', () => ({
@@ -20,7 +20,9 @@ afterEach(() => {
 it('keeps an active pre-Stop instance locked and reports the required server restart', () => {
   const legacy = { snapshot: () => ({ status: 'running' }) };
   processState.emailSequencerFollowUps = legacy;
-  expect(() => getFollowUpsService()).toThrow('Restart the development server');
+  expect(() => getFollowUpPreparationService()).toThrow(
+    'Restart the development server',
+  );
   expect(processState.emailSequencerFollowUps).toBe(legacy);
   expect(getInfrastructure).not.toHaveBeenCalled();
 });
@@ -29,8 +31,8 @@ it('upgrades an inactive pre-Stop instance once', () => {
   processState.emailSequencerFollowUps = {
     snapshot: () => ({ status: 'completed' }),
   };
-  const service = getFollowUpsService();
+  const service = getFollowUpPreparationService();
   expect(typeof service.stop).toBe('function');
-  expect(getFollowUpsService()).toBe(service);
+  expect(getFollowUpPreparationService()).toBe(service);
   expect(getInfrastructure).toHaveBeenCalledTimes(1);
 });

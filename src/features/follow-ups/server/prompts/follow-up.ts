@@ -1,4 +1,4 @@
-import type { GenerationContext } from '../types';
+import type { GenerationContext } from '../types/follow-up';
 
 export const FOLLOW_UP_INSTRUCTIONS = `Write only a concise plain-text cold-email follow-up body. Do not write a subject, commentary, Markdown fences or structured data. The application has already decided eligibility and the step; never reconsider those decisions.
 Use the campaign as the source of truth for the offer, positioning, exclusions, messaging guidance and CTA. Follow the configured step guidance within those campaign constraints. Use only supplied evidence; do not invent claims, results, relationships, research or facts, and do not browse or use tools. Avoid repeating prior messages. End every follow-up with a blank line followed by Freeman on its own line. Do not add any other signature details. Include this sign-off within the 180-word limit.

@@ -2,18 +2,18 @@ import 'server-only';
 
 import type { DashboardState } from '../../types';
 import type { IConnectionsService } from '../interfaces/connections-service.interface';
-import type { IInteractionsRepository } from '../interfaces/interactions-repository.interface';
-import type { IProspectsRepository } from '../interfaces/prospects-repository.interface';
 import type { ISequencerService } from '../interfaces/sequencer-service.interface';
 import type { SequencerRuntime } from '../runtime/sequencer-runtime';
-import type { Interaction } from '../types';
+import type { Interaction } from '../types/interaction';
 import type { EmailSender } from '@/infrastructure/email/interfaces/sender.interface';
 import type { SendResult } from '@/infrastructure/email/types/send-result';
+import type { IDraftQueueRepository } from '@/modules/outreach/interactions';
+import type { IProspectContactRepository } from '@/modules/outreach/prospects';
 
 export class SequencerService implements ISequencerService {
   constructor(
-    private readonly interactions: IInteractionsRepository,
-    private readonly prospects: IProspectsRepository,
+    private readonly interactions: IDraftQueueRepository,
+    private readonly prospects: IProspectContactRepository,
     private readonly sender: EmailSender,
     private readonly connections: IConnectionsService,
     private readonly runtime: SequencerRuntime,
@@ -55,7 +55,10 @@ export class SequencerService implements ISequencerService {
     // Recipient email lives on a linked table, so resolve one candidate at a time.
     while (!this.runtime.isStopping()) {
       const excluded = this.runtime.excludedIds();
-      const candidate = await this.interactions.next(runStartedAt, excluded);
+      const candidate = await this.interactions.findNextDraft(
+        runStartedAt,
+        excluded,
+      );
 
       if (this.runtime.isStopping() || !candidate) return null;
       if (
@@ -79,9 +82,18 @@ export class SequencerService implements ISequencerService {
       }
 
       this.runtime.exclude(candidate.id);
-      const prospect = await this.prospects.findById(prospectId);
+      const prospect = await this.prospects.findContactById(prospectId);
 
       if (this.runtime.isStopping()) return null;
+      if (prospect.doNotContact) {
+        this.runtime.rejected({
+          kind: 'definite',
+          interactionId: candidate.id,
+          message:
+            'Prospect is marked Do Not Contact. Draft unchanged; no email sent.',
+        });
+        continue;
+      }
       if (
         !prospect.email ||
         !candidate.subject.trim() ||
@@ -150,7 +162,11 @@ export class SequencerService implements ISequencerService {
           this.runtime.sent(summary, result.sentAt);
 
           try {
-            await this.interactions.complete(interaction.id, result);
+            await this.interactions.confirmSent(interaction.id, {
+              sentAt: result.sentAt,
+              gmailMessageId: result.gmailMessageId,
+              gmailThreadId: result.gmailThreadId,
+            });
           } catch {
             this.runtime.halt({
               kind: 'reconciliation',
