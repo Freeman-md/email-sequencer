@@ -3,6 +3,7 @@ import { describe, expect, it, vi } from 'vitest';
 import { FOLLOW_UP_STEPS } from '@/features/follow-ups/constants/steps';
 import { assessFollowUp } from '@/features/follow-ups/server/services/eligibility';
 import { FollowUpsService } from '@/features/follow-ups/server/services/follow-ups.service';
+import { TextGenerationError } from '@/infrastructure/text-generation/error';
 
 import type {
   Prospect,
@@ -420,4 +421,24 @@ describe('preparation stop and limits', () => {
       expect(service.stop().status).toBe('stopped');
     },
   );
+});
+
+it('shows safe generation diagnostics without exposing unexpected provider errors', async () => {
+  for (const cause of [
+    new TextGenerationError('quota', 'req_test'),
+    new Error('PRIVATE upstream detail'),
+  ]) {
+    const { service, generator, interactions } = setup();
+    generator.generate.mockRejectedValueOnce(cause);
+    service.start();
+    await finished(service);
+    const message = service.snapshot().errors[0]!.message;
+    expect(message).not.toContain('PRIVATE');
+    if (cause instanceof TextGenerationError) {
+      expect(message).toContain('quota');
+      expect(message).toContain('req_test');
+    }
+    expect(interactions.createDraft).not.toHaveBeenCalled();
+    expect(generator.generate).toHaveBeenCalledTimes(1);
+  }
 });

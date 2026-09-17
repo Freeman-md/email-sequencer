@@ -1,4 +1,7 @@
 import 'server-only';
+
+import { TextGenerationError } from '@/infrastructure/text-generation/error';
+
 import { initialPreparationState } from '../../types/preparation';
 
 import { assessFollowUp } from './eligibility';
@@ -171,7 +174,7 @@ export class FollowUpsService implements IFollowUpsService {
         /^subject:/im.test(message) ||
         message.includes('```')
       )
-        throw new Error('Invalid generated body');
+        throw new TextGenerationError('invalid_body');
       phase = 'read';
       // Generation may take time. Read the reciprocal links again to detect new
       // replies, outbound sends or Drafts before the only persistent mutation.
@@ -211,7 +214,7 @@ export class FollowUpsService implements IFollowUpsService {
         gmailThreadId: recheck.due.original.gmailThreadId,
       });
       this.state.drafted++;
-    } catch {
+    } catch (cause) {
       if (this.cancellation.signal.aborted && phase !== 'write') {
         this.skip('Preparation stopped before draft creation');
 
@@ -221,7 +224,9 @@ export class FollowUpsService implements IFollowUpsService {
         phase === 'write'
           ? 'Draft creation was not confirmed. Check this Prospect in Airtable before another run; no write was retried.'
           : phase === 'generate'
-            ? 'Generation failed or returned an invalid body. No Draft created; check AI configuration and availability.'
+            ? cause instanceof TextGenerationError
+              ? `${cause.message} No Draft created; no automatic retry was made.`
+              : 'Generation failed unexpectedly. No Draft created; check server logs.'
             : 'Cannot read complete Prospect, Campaign or Interaction context. Check Airtable access, fields and timestamps.';
       this.skip(
         phase === 'write'

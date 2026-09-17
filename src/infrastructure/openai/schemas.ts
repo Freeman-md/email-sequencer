@@ -1,7 +1,16 @@
 import { z } from 'zod';
 
 export const responseSchema = z.object({
-  status: z.literal('completed'),
+  id: z.string().optional(),
+  status: z.string(),
+  incomplete_details: z.object({ reason: z.string() }).nullish(),
+  usage: z
+    .object({
+      input_tokens: z.number().nonnegative(),
+      output_tokens: z.number().nonnegative(),
+      total_tokens: z.number().nonnegative(),
+    })
+    .nullish(),
   output: z.array(
     z.object({
       type: z.string(),
@@ -10,4 +19,8 @@ export const responseSchema = z.object({
         .optional(),
     }),
   ),
+});
+
+export const errorSchema = z.object({
+  error: z.object({ code: z.string().nullish() }),
 });
