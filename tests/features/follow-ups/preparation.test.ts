@@ -178,10 +178,12 @@ describe('follow-up eligibility', () => {
 
 function setup() {
   const prospects = {
-    pageWithInteractions: vi.fn().mockResolvedValue({ ids: [prospect.id] }),
     findContextById: vi.fn().mockResolvedValue(prospect),
   };
   const interactions = {
+    pageFollowUpCandidateProspects: vi
+      .fn()
+      .mockResolvedValue({ ids: [prospect.id] }),
     findHistoryByIds: vi.fn().mockResolvedValue([initial]),
     createFollowUpDraft: vi.fn().mockResolvedValue(undefined),
   };
@@ -213,6 +215,121 @@ async function finished(service: FollowUpPreparationService) {
 }
 
 describe('preparation workflow', () => {
+  it('deduplicates candidate prospects within and across pages for each run', async () => {
+    const { service, interactions, prospects, generator } = setup();
+    interactions.pageFollowUpCandidateProspects
+      .mockResolvedValueOnce({
+        ids: [prospect.id, prospect.id],
+        offset: 'next',
+      })
+      .mockResolvedValueOnce({ ids: [prospect.id] });
+
+    service.start();
+    await finished(service);
+
+    expect(interactions.pageFollowUpCandidateProspects.mock.calls).toEqual([
+      [undefined],
+      ['next'],
+    ]);
+    expect(service.snapshot()).toMatchObject({ checked: 1, drafted: 1 });
+    expect(prospects.findContextById).toHaveBeenCalledTimes(2);
+    expect(generator.generate).toHaveBeenCalledTimes(1);
+
+    service.start();
+    await finished(service);
+    expect(generator.generate).toHaveBeenCalledTimes(2);
+  });
+
+  it('does not load or generate for legacy-only prospects excluded from candidate pages', async () => {
+    const { service, interactions, prospects, generator } = setup();
+    interactions.pageFollowUpCandidateProspects.mockResolvedValue({ ids: [] });
+    interactions.findHistoryByIds.mockResolvedValue([
+      { ...initial, mailboxIds: [] },
+    ]);
+
+    service.start();
+    await finished(service);
+
+    expect(service.snapshot()).toMatchObject({
+      status: 'completed',
+      checked: 0,
+      drafted: 0,
+    });
+    expect(prospects.findContextById).not.toHaveBeenCalled();
+    expect(interactions.findHistoryByIds).not.toHaveBeenCalled();
+    expect(generator.generate).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    [
+      'unattributed email reply',
+      {
+        ...initial,
+        id: 'recReply',
+        direction: 'Inbound',
+        mailboxIds: [],
+        receivedAt: '2026-09-02T12:00:00Z',
+      },
+      'Reply already received',
+    ],
+    [
+      'unattributed cross-channel reply',
+      {
+        ...initial,
+        id: 'recReply',
+        direction: 'Inbound',
+        channel: 'LinkedIn',
+        mailboxIds: [],
+        receivedAt: '2026-09-02T12:00:00Z',
+      },
+      'Reply already received',
+    ],
+    [
+      'unattributed existing draft',
+      {
+        ...followup,
+        id: 'recDraft',
+        status: 'Draft',
+        mailboxIds: [],
+        sentAt: '',
+        gmailMessageId: '',
+      },
+      'Existing Draft Follow-up',
+    ],
+    [
+      'mixed legacy and attributed initial messages',
+      { ...initial, id: 'recLegacy', mailboxIds: [] },
+      'Ambiguous initial conversation',
+    ],
+    [
+      'multiple mailbox links',
+      { ...initial, mailboxIds: ['recMailboxA', 'recMailboxB'] },
+      'Missing or ambiguous original mailbox ownership; reconcile historical records',
+    ],
+  ])(
+    'does not generate for %s in full history',
+    async (_label, item, reason) => {
+      const { service, interactions, prospects, generator } = setup();
+      const history = item.id === initial.id ? [item] : [initial, item];
+      const interactionIds = history.map((interaction) => interaction.id);
+      prospects.findContextById.mockResolvedValue({
+        ...prospect,
+        interactionIds,
+      });
+      interactions.findHistoryByIds.mockResolvedValue(history);
+
+      service.start();
+      await finished(service);
+
+      expect(interactions.findHistoryByIds).toHaveBeenCalledWith(
+        interactionIds,
+      );
+      expect(service.snapshot().reasons[reason]).toBe(1);
+      expect(generator.generate).not.toHaveBeenCalled();
+      expect(interactions.createFollowUpDraft).not.toHaveBeenCalled();
+    },
+  );
+
   it('locks concurrent runs, saves only a draft, and suppresses duplicates on the next run', async () => {
     const { service, interactions, generator, prospects } = setup();
     interactions.createFollowUpDraft.mockImplementation(async () => {
@@ -267,8 +384,8 @@ describe('preparation workflow', () => {
     expect(service.snapshot().reasons['Reply already received']).toBe(1);
   });
   it('continues across pages after generation and write failures without retrying either', async () => {
-    const { service, prospects, generator, interactions } = setup();
-    prospects.pageWithInteractions
+    const { service, generator, interactions } = setup();
+    interactions.pageFollowUpCandidateProspects
       .mockResolvedValueOnce({ ids: ['recFirst', 'recSecond'], offset: 'next' })
       .mockResolvedValueOnce({ ids: ['recThird'] });
     generator.generate.mockRejectedValueOnce(
@@ -279,7 +396,9 @@ describe('preparation workflow', () => {
     );
     service.start();
     await finished(service);
-    expect(prospects.pageWithInteractions).toHaveBeenLastCalledWith('next');
+    expect(
+      interactions.pageFollowUpCandidateProspects,
+    ).toHaveBeenLastCalledWith('next');
     expect(service.snapshot()).toMatchObject({
       status: 'completed',
       checked: 3,
@@ -294,8 +413,8 @@ describe('preparation workflow', () => {
   });
 
   it('stops with an actionable error when Airtable repeats a page cursor', async () => {
-    const { service, prospects, generator } = setup();
-    prospects.pageWithInteractions.mockResolvedValue({
+    const { service, interactions, generator } = setup();
+    interactions.pageFollowUpCandidateProspects.mockResolvedValue({
       ids: [prospect.id],
       offset: 'repeated-page',
     });
@@ -303,7 +422,7 @@ describe('preparation workflow', () => {
     service.start();
     await finished(service);
 
-    expect(prospects.pageWithInteractions.mock.calls).toEqual([
+    expect(interactions.pageFollowUpCandidateProspects.mock.calls).toEqual([
       [undefined],
       ['repeated-page'],
     ]);
@@ -319,7 +438,7 @@ describe('preparation workflow', () => {
 describe('preparation stop and limits', () => {
   it('limits confirmed drafts, without counting skips or reading the next page', async () => {
     const { service, prospects, interactions, generator } = setup();
-    prospects.pageWithInteractions.mockResolvedValue({
+    interactions.pageFollowUpCandidateProspects.mockResolvedValue({
       ids: ['recSkip', 'recReady', 'recUnused'],
       offset: 'next',
     });
@@ -333,13 +452,15 @@ describe('preparation stop and limits', () => {
       drafted: 1,
       skipped: 1,
     });
-    expect(prospects.pageWithInteractions).toHaveBeenCalledTimes(1);
+    expect(interactions.pageFollowUpCandidateProspects).toHaveBeenCalledTimes(
+      1,
+    );
     expect(generator.generate).toHaveBeenCalledTimes(1);
     expect(interactions.createFollowUpDraft).toHaveBeenCalledTimes(1);
   });
 
   it('rejects invalid limits without starting any work', () => {
-    const { service, prospects } = setup();
+    const { service, interactions } = setup();
     for (const limit of [
       0,
       -1,
@@ -350,14 +471,14 @@ describe('preparation stop and limits', () => {
     ]) {
       expect(() => service.start(limit)).toThrow('positive whole number');
     }
-    expect(prospects.pageWithInteractions).not.toHaveBeenCalled();
+    expect(interactions.pageFollowUpCandidateProspects).not.toHaveBeenCalled();
     expect(service.snapshot().status).toBe('idle');
   });
 
   it('stops during a candidate read without beginning a prospect', async () => {
-    const { service, prospects } = setup();
+    const { service, prospects, interactions } = setup();
     let resolve!: (page: { ids: string[] }) => void;
-    prospects.pageWithInteractions.mockReturnValueOnce(
+    interactions.pageFollowUpCandidateProspects.mockReturnValueOnce(
       new Promise((done) => {
         resolve = done;
       }),
@@ -409,8 +530,8 @@ describe('preparation stop and limits', () => {
   it.each([false, true])(
     'settles an in-flight draft write before releasing the lock (failure: %s)',
     async (failure) => {
-      const { service, prospects, interactions } = setup();
-      prospects.pageWithInteractions.mockResolvedValue({
+      const { service, interactions } = setup();
+      interactions.pageFollowUpCandidateProspects.mockResolvedValue({
         ids: [prospect.id, 'recNext'],
         offset: 'next',
       });
@@ -438,7 +559,9 @@ describe('preparation stop and limits', () => {
         errorCount: failure ? 1 : 0,
         checked: 1,
       });
-      expect(prospects.pageWithInteractions).toHaveBeenCalledTimes(1);
+      expect(interactions.pageFollowUpCandidateProspects).toHaveBeenCalledTimes(
+        1,
+      );
       expect(interactions.createFollowUpDraft).toHaveBeenCalledTimes(1);
       expect(service.stop().status).toBe('stopped');
     },

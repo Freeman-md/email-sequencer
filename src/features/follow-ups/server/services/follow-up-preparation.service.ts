@@ -121,7 +121,8 @@ export class FollowUpPreparationService implements IFollowUpPreparationService {
     const seenProspects = new Set<string>();
 
     while (this.canContinue()) {
-      const page = await this.prospects.pageWithInteractions(offset);
+      const page =
+        await this.interactions.pageFollowUpCandidateProspects(offset);
       await this.preparePage(page.ids, seenProspects);
 
       if (!this.canContinue()) {

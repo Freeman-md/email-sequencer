@@ -17,6 +17,9 @@ export interface IDraftQueueRepository {
 }
 
 export interface IFollowUpDraftRepository {
+  pageFollowUpCandidateProspects(
+    offset?: string,
+  ): Promise<{ ids: string[]; offset?: string }>;
   findHistoryByIds(ids: string[]): Promise<HistoryInteraction[]>;
   createFollowUpDraft(draft: FollowUpDraft): Promise<void>;
 }

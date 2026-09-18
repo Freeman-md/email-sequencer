@@ -9,6 +9,10 @@ import type {
 } from '../types';
 import type { AirtableRecord } from '@/infrastructure/airtable/schemas';
 
+export function mapInteractionProspectIds(record: AirtableRecord): string[] {
+  return linksField(record, field.prospect);
+}
+
 export function mapDraftCandidate(record: AirtableRecord): DraftCandidate {
   return {
     id: record.id,
@@ -20,7 +24,7 @@ export function mapDraftCandidate(record: AirtableRecord): DraftCandidate {
     channel: textField(record, field.channel),
     subject: textField(record, field.subject),
     message: textField(record, field.message),
-    prospectIds: linksField(record, field.prospect),
+    prospectIds: mapInteractionProspectIds(record),
     createdAt: textField(record, field.createdAt),
     sentAt: textField(record, field.sentAt),
     mailboxIds: linksField(record, field.mailbox),

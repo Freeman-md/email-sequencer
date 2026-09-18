@@ -2,6 +2,94 @@ import { expect, it, vi } from 'vitest';
 
 import { InteractionRepository } from '@/modules/outreach/interactions/airtable/interaction.repository';
 
+it('pages candidate prospects through completed outbound initial emails with mailbox attribution', async () => {
+  const request = vi
+    .fn()
+    .mockResolvedValueOnce({
+      records: [
+        { id: 'recInitialA', fields: { Prospect: ['recProspectA'] } },
+        { id: 'recInitialB', fields: { Prospect: ['recProspectA'] } },
+        { id: 'recUnlinked', fields: {} },
+        {
+          id: 'recAmbiguous',
+          fields: { Prospect: ['recProspectA', 'recProspectB'] },
+        },
+      ],
+      offset: 'next',
+    })
+    .mockResolvedValueOnce({ records: [] });
+  const repository = new InteractionRepository({ request });
+
+  expect(await repository.pageFollowUpCandidateProspects()).toEqual({
+    ids: ['recProspectA', 'recProspectA', 'recProspectA', 'recProspectB'],
+    offset: 'next',
+  });
+  expect(request.mock.calls[0]?.[0]).toBe('tblqbyXiQs2ZAHTrH/listRecords');
+  expect(request.mock.calls[0]?.[1].method).toBe('POST');
+  const query = JSON.parse(request.mock.calls[0]?.[1].body);
+  expect(query).toEqual({
+    pageSize: 25,
+    fields: ['Prospect'],
+    filterByFormula:
+      "AND({Channel}='Email',{Direction}='Outbound',{Status}='Completed',{Type}='Initial Message',{Sent From Mailbox}!=BLANK())",
+  });
+
+  expect(await repository.pageFollowUpCandidateProspects('next')).toEqual({
+    ids: [],
+    offset: undefined,
+  });
+  expect(JSON.parse(request.mock.calls[1]?.[1].body)).toEqual({
+    ...query,
+    offset: 'next',
+  });
+});
+
+it('retains replies and drafts without mailbox attribution when reading complete history', async () => {
+  const request = vi.fn().mockResolvedValue({
+    records: [
+      {
+        id: 'recReply',
+        fields: {
+          Direction: 'Inbound',
+          Status: 'Completed',
+          Channel: 'LinkedIn',
+          Prospect: ['recProspect'],
+          'Received At': '2026-09-12T11:00:00Z',
+        },
+      },
+      {
+        id: 'recDraft',
+        fields: {
+          Direction: 'Outbound',
+          Status: 'Draft',
+          Channel: 'Email',
+          Type: 'Follow-up',
+          Prospect: ['recProspect'],
+        },
+      },
+    ],
+  });
+  const repository = new InteractionRepository({ request });
+
+  expect(await repository.findHistoryByIds(['recReply', 'recDraft'])).toEqual([
+    expect.objectContaining({
+      id: 'recReply',
+      direction: 'Inbound',
+      channel: 'LinkedIn',
+      mailboxIds: [],
+    }),
+    expect.objectContaining({
+      id: 'recDraft',
+      status: 'Draft',
+      type: 'Follow-up',
+      mailboxIds: [],
+    }),
+  ]);
+  expect(JSON.parse(request.mock.calls[0]?.[1].body).filterByFormula).toBe(
+    "OR(RECORD_ID()='recReply',RECORD_ID()='recDraft')",
+  );
+});
+
 it('creates a linked Draft with the original subject/thread and no send identifiers or timestamps', async () => {
   const fields = {
     Direction: 'Outbound',

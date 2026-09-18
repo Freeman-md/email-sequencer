@@ -7,9 +7,6 @@ export interface IProspectContactRepository {
 
 export interface IProspectContextRepository {
   findContextById(id: string): Promise<ProspectContext>;
-  pageWithInteractions(
-    offset?: string,
-  ): Promise<{ ids: string[]; offset?: string }>;
 }
 
 export interface IProspectRepository

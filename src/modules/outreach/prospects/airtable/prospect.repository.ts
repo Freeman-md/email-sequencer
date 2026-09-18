@@ -44,23 +44,4 @@ export class ProspectRepository implements IProspectRepository {
       await this.client.request(`${PROSPECT_TABLE}?${query}`),
     );
   }
-
-  async pageWithInteractions(offset?: string) {
-    const data = recordsSchema.parse(
-      await this.client.request(`${PROSPECT_TABLE}/listRecords`, {
-        method: 'POST',
-        body: JSON.stringify({
-          pageSize: 25,
-          fields: [field.name],
-          filterByFormula: `{${field.interactionIds}}!=BLANK()`,
-          ...(offset ? { offset } : {}),
-        }),
-      }),
-    );
-
-    return {
-      ids: data.records.map((record) => record.id),
-      offset: data.offset,
-    };
-  }
 }

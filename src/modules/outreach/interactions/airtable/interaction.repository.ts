@@ -12,6 +12,7 @@ import {
   mapInteractionHistory,
   draftFields,
   mapInteractionCompletion,
+  mapInteractionProspectIds,
 } from './interaction.mapper';
 
 import type { IInteractionRepository } from '../interfaces/interaction-repository.interface';
@@ -127,6 +128,32 @@ export class InteractionRepository implements IInteractionRepository {
     }
 
     return mapDraftCandidate(record);
+  }
+
+  async pageFollowUpCandidateProspects(offset?: string) {
+    const conditions = [
+      `{${field.channel}}='Email'`,
+      `{${field.direction}}='Outbound'`,
+      `{${field.status}}='Completed'`,
+      `{${field.type}}='Initial Message'`,
+      `{${field.mailbox}}!=BLANK()`,
+    ];
+    const data = recordsSchema.parse(
+      await this.client.request(`${INTERACTION_TABLE}/listRecords`, {
+        method: 'POST',
+        body: JSON.stringify({
+          pageSize: 25,
+          fields: [field.prospect],
+          filterByFormula: `AND(${conditions.join(',')})`,
+          ...(offset ? { offset } : {}),
+        }),
+      }),
+    );
+
+    return {
+      ids: data.records.flatMap(mapInteractionProspectIds),
+      offset: data.offset,
+    };
   }
 
   async findHistoryByIds(ids: string[]) {
