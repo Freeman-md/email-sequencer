@@ -1,7 +1,7 @@
 import { describe, expect, it, vi } from 'vitest';
 
 import { FOLLOW_UP_STEPS } from '@/features/follow-ups/constants/steps';
-import { assessFollowUp } from '@/features/follow-ups/server/services/eligibility';
+import { assessFollowUp } from '@/features/follow-ups/server/policies/follow-up-eligibility';
 import { FollowUpPreparationService } from '@/features/follow-ups/server/services/follow-up-preparation.service';
 import { TextGenerationError } from '@/infrastructure/text-generation/error';
 
@@ -235,12 +235,8 @@ describe('preparation workflow', () => {
     });
     expect(prospects.findContextById).toHaveBeenCalledTimes(2);
     expect(generator.generate).toHaveBeenCalledWith(
-      expect.objectContaining({
-        prospect,
-        campaign: expect.objectContaining({ name: 'Relevant offer' }),
-        history: [initial],
-        due: expect.objectContaining({ step: FOLLOW_UP_STEPS[0] }),
-      }),
+      expect.any(String),
+      expect.stringContaining(prospect.name),
       expect.any(AbortSignal),
     );
     service.start();
@@ -352,7 +348,7 @@ describe('preparation stop and limits', () => {
   it('cancels generation, creates no draft and allows a fresh run after stopping', async () => {
     const { service, generator, interactions } = setup();
     generator.generate.mockImplementation(
-      (_context, signal: AbortSignal) =>
+      (_instructions, _input, signal: AbortSignal) =>
         new Promise((_resolve, reject) => {
           signal.addEventListener(
             'abort',
@@ -373,7 +369,7 @@ describe('preparation stop and limits', () => {
       errorCount: 0,
     });
     expect(interactions.createFollowUpDraft).not.toHaveBeenCalled();
-    expect(generator.generate.mock.calls[0]?.[1].aborted).toBe(true);
+    expect(generator.generate.mock.calls[0]?.[2].aborted).toBe(true);
     generator.generate.mockResolvedValue('A fresh follow-up.');
     service.start(1);
     await finished(service);

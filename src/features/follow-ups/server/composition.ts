@@ -6,7 +6,6 @@ import { composeOutreachRepositories } from '@/modules/outreach/server';
 import { FOLLOW_UP_STEPS } from '../constants/steps';
 
 import { FollowUpPreparationService } from './services/follow-up-preparation.service';
-import { FollowUpGenerator } from './services/generator';
 
 function composeService() {
   const { airtable, textGenerator } = getInfrastructure();
@@ -18,7 +17,7 @@ function composeService() {
     prospects,
     interactions,
     campaigns,
-    new FollowUpGenerator(textGenerator),
+    textGenerator,
     FOLLOW_UP_STEPS,
   );
 }

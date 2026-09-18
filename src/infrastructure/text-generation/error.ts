@@ -19,8 +19,6 @@ const messages = {
   incomplete: 'OpenAI did not complete generation.',
   refused: 'OpenAI refused generation.',
   empty: 'OpenAI returned no email body.',
-  invalid_body:
-    'Generated body failed validation: it must be plain text, at most 180 words and 5000 characters, with no subject line or code fences.',
 } as const;
 
 // Only application-owned messages cross into operator-facing errors.
