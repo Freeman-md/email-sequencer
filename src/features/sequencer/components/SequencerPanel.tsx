@@ -1,5 +1,7 @@
 'use client';
 
+import { useState } from 'react';
+
 import { DEFAULT_INTERVAL_SECONDS, initialRunState } from '../constants/run';
 import { useDashboardControls } from '../hooks/use-dashboard-controls';
 import { useSequencer } from '../hooks/use-sequencer';
@@ -7,11 +9,9 @@ import { useServerClock } from '../hooks/use-server-clock';
 import { presentCurrentInteraction } from '../presenters/current-interaction';
 import { presentRunStatus } from '../presenters/run-status';
 
-import { CurrentInteraction } from './CurrentInteraction';
 import { DashboardHeader } from './DashboardHeader';
-import { DashboardNotices, RunNotices } from './DashboardNotices';
-import { LastSent } from './LastSent';
-import { RunStatus } from './RunStatus';
+import { MailboxManagement } from './MailboxManagement';
+import { Overview } from './Overview';
 
 import type { DashboardState } from '../types';
 import type { ReactNode } from 'react';
@@ -27,6 +27,9 @@ export function SequencerPanel({
   initialError?: string;
   oauthFailed?: boolean;
 }) {
+  const [activeView, setActiveView] = useState<'overview' | 'mailboxes'>(
+    'overview',
+  );
   const { data, error, busy, command, clockSample } = useSequencer(initial);
   const run = data?.run ?? initialRunState();
   const controls = useDashboardControls({ data, run, error, busy, command });
@@ -39,35 +42,30 @@ export function SequencerPanel({
     controls.valid ? controls.seconds : DEFAULT_INTERVAL_SECONDS,
   );
   const displayError = error ?? (!data ? initialError : undefined);
-  const panelClass =
-    run.status === 'error'
-      ? 'panel-error'
-      : run.status === 'completed'
-        ? 'panel-completed'
-        : '';
 
   return (
     <main className="dashboard">
       <DashboardHeader
         data={data}
-        interval={controls.interval}
-        intervalDisabled={controls.intervalDisabled}
-        valid={controls.valid}
-        status={status}
-        onIntervalChange={controls.setInterval}
+        activeView={activeView}
+        onViewChange={setActiveView}
       />
-      <DashboardNotices
-        data={data}
-        displayError={displayError}
-        oauthFailed={oauthFailed}
-      />
-      <div className={`live-panel ${panelClass}`}>
-        <CurrentInteraction presentation={current} />
-        <RunStatus run={run} presentation={status} controls={controls} />
+      <div hidden={activeView !== 'overview'}>
+        <Overview
+          data={data}
+          displayError={displayError}
+          oauthFailed={oauthFailed}
+          run={run}
+          current={current}
+          status={status}
+          controls={controls}
+        >
+          {children}
+        </Overview>
       </div>
-      <LastSent sent={run.lastSent} />
-      <RunNotices run={run} />
-      {children}
+      <div hidden={activeView !== 'mailboxes'}>
+        <MailboxManagement gmail={data?.gmail} run={run} />
+      </div>
     </main>
   );
 }

@@ -80,13 +80,14 @@ export function presentRunStatus(
   }
 
   return {
-    title: run.phase === 'stopped' ? 'Stopped' : ready ? 'Ready' : 'Idle',
+    title:
+      run.phase === 'stopped' ? 'Stopped' : ready ? 'Ready to run' : 'Idle',
     subtitle:
       run.phase === 'stopped'
         ? 'Stopped by you. Start a new run when ready.'
         : ready
-          ? 'Airtable and Gmail are connected.'
-          : 'Check the connections above before starting a run.',
+          ? 'Set the interval, then start.'
+          : 'Check Airtable and Gmail before starting a run.',
     stateNumber: ready ? '02' : '01',
     stateLabel: ready ? 'Connected / ready' : 'Connections unavailable / idle',
     appearance: ready ? 'success' : 'muted',

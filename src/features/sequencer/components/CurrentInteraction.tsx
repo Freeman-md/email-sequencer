@@ -8,18 +8,18 @@ export function CurrentInteraction({
   const { eyebrow, title, description, label, value, details } = presentation;
 
   return (
-    <section className="current" aria-label="Current Interaction">
-      <p className="eyebrow">{eyebrow}</p>
-      <h2 className="display">{title}</h2>
-      <p className="lead">{description}</p>
-      <div className="subject">
-        <p className="eyebrow">{label}</p>
+    <section className="current-interaction" aria-label="Current interaction">
+      <p className="section-label">{eyebrow}</p>
+      <h2>{title}</h2>
+      <p className="current-description">{description}</p>
+      <div className="interaction-subject">
+        <p className="section-label">{label}</p>
         <h3>{value}</h3>
       </div>
-      <dl className="details">
+      <dl className="interaction-details">
         {details.map(([key, val]) => (
           <div key={key}>
-            <dt className="eyebrow">{key}</dt>
+            <dt>{key}</dt>
             <dd>{val}</dd>
           </div>
         ))}

@@ -58,7 +58,7 @@ test('desktop states, controls and mobile preserve operational fields without ov
   });
   await page.goto('/');
   await expect(
-    page.getByRole('heading', { name: 'All systems ready' }),
+    page.getByRole('heading', { name: 'Ready when you are' }),
   ).toBeVisible();
   await page.screenshot({
     path: 'output/playwright/ready.png',
@@ -147,6 +147,44 @@ test('desktop states, controls and mobile preserve operational fields without ov
     fullPage: true,
   });
   expect(errors).toEqual([]);
+});
+
+test('mailbox navigation preserves the live run and locks connection changes', async ({
+  page,
+}) => {
+  const state = fixture();
+  state.run = {
+    ...state.run,
+    status: 'running',
+    phase: 'waiting',
+    runStartedAt: '2026-09-09T12:00:00Z',
+    nextSendAt: '2026-09-09T12:15:00Z',
+    sentCount: 3,
+  };
+  await page.route('**/api/sequencer/**', (route) =>
+    route.fulfill({ json: state }),
+  );
+
+  await page.goto('/');
+  await page.getByRole('button', { name: 'Mailboxes' }).click();
+  await expect(
+    page.getByRole('heading', { name: 'Mailboxes', exact: true }),
+  ).toBeVisible();
+  await expect(
+    page.getByText('maya.ops@gmail.com', { exact: true }),
+  ).toBeVisible();
+  await expect(
+    page.getByRole('button', { name: 'Reconnect Gmail' }),
+  ).toBeDisabled();
+  await expect(
+    page.getByText('Stop the active run before changing the Gmail connection.'),
+  ).toBeVisible();
+
+  await page.getByRole('button', { name: 'Overview' }).click();
+  await expect(
+    page.getByRole('heading', { name: /Next send in/ }),
+  ).toBeVisible();
+  await expect(page.getByRole('button', { name: 'Stop Run' })).toBeEnabled();
 });
 
 for (const staleOutcome of ['success', 'failure'] as const) {

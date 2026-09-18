@@ -1,79 +1,47 @@
-import { MAX_INTERVAL_SECONDS } from '../constants/run';
-
-import type { RunStatusPresentation } from '../presenters/run-status';
 import type { DashboardState } from '../types';
 
 export function DashboardHeader({
   data,
-  interval,
-  intervalDisabled,
-  valid,
-  status,
-  onIntervalChange,
+  activeView,
+  onViewChange,
 }: {
   data: DashboardState | null;
-  interval: string;
-  intervalDisabled: boolean;
-  valid: boolean;
-  status: RunStatusPresentation;
-  onIntervalChange: (value: string) => void;
+  activeView: 'overview' | 'mailboxes';
+  onViewChange: (view: 'overview' | 'mailboxes') => void;
 }) {
+  const airtableConnected = Boolean(data?.airtable.connected);
+
   return (
-    <header className="header">
-      <div className="heading">
-        <h1>Email Sequencer — V1</h1>
-        <p className="desktop-description">
-          Send eligible Airtable drafts through one connected Gmail account.
+    <header className="app-header">
+      <div className="brand-row">
+        <h1>Email Sequencer</h1>
+        <p
+          className={`connection-indicator ${
+            airtableConnected ? 'success' : 'danger-text'
+          }`}
+        >
+          <i className="dot" />
+          {airtableConnected ? 'Airtable connected' : 'Airtable unavailable'}
         </p>
-        <p className="mobile-description">Internal sending tool</p>
       </div>
-      <div className="connections">
-        <div className="connection">
-          <span className="eyebrow">AIRTABLE</span>
-          <span
-            className={`connection-state ${data?.airtable.connected ? 'success' : 'muted'}`}
-          >
-            <i className="dot" />
-            <span className="connection-text">
-              {data?.airtable.connected ? 'Connected' : 'Unavailable'}
-            </span>
-          </span>
-        </div>
-        <div className="connection gmail">
-          <span className="eyebrow">GMAIL</span>
-          <span
-            className={`connection-state ${data?.gmail.connected ? 'success' : 'muted'}`}
-          >
-            <i className="dot" />
-            <span className="connection-text">
-              {data?.gmail.connected ? 'Connected' : 'Disconnected'}
-            </span>
-          </span>
-          <small>{data?.gmail.detail ?? 'Connect once via OAuth'}</small>
-        </div>
-        <div className="connection interval">
-          <label className="eyebrow" htmlFor="interval">
-            <span className="desktop-label">INTERVAL SECONDS</span>
-            <span className="mobile-label">INTERVAL</span>
-          </label>
-          <input
-            id="interval"
-            aria-label="INTERVAL SECONDS"
-            type="number"
-            min="1"
-            max={MAX_INTERVAL_SECONDS}
-            step="1"
-            value={interval}
-            onChange={(event) => onIntervalChange(event.target.value)}
-            disabled={intervalDisabled}
-            aria-invalid={!valid}
-          />
-        </div>
-        <div className="connection state">
-          <span className="eyebrow">STATE {status.stateNumber}</span>
-          <strong>{status.stateLabel}</strong>
-        </div>
-      </div>
+      <nav className="primary-navigation" aria-label="Primary navigation">
+        <button
+          className={activeView === 'overview' ? 'selected' : ''}
+          type="button"
+          aria-current={activeView === 'overview' ? 'page' : undefined}
+          onClick={() => onViewChange('overview')}
+        >
+          Overview
+        </button>
+        <button
+          className={activeView === 'mailboxes' ? 'selected' : ''}
+          type="button"
+          aria-current={activeView === 'mailboxes' ? 'page' : undefined}
+          onClick={() => onViewChange('mailboxes')}
+        >
+          Mailboxes
+        </button>
+      </nav>
     </header>
   );
 }

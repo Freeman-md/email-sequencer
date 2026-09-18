@@ -91,14 +91,14 @@ export function presentCurrentInteraction(
   }
 
   return {
-    eyebrow: 'READY TO RUN',
-    title: 'All systems ready',
-    description: 'Set the interval, then start sending.',
-    label: 'INTERVAL SECONDS',
-    value: `${interval} seconds`,
+    eyebrow: 'Manual run',
+    title: 'Ready when you are',
+    description: 'Send eligible Airtable drafts one at a time.',
+    label: 'Run boundary',
+    value: 'Only eligible drafts at run start are included.',
     details: [
-      ['DEFAULT', `${DEFAULT_INTERVAL_SECONDS / 60} minutes`],
-      ['RUN INCLUDES', 'Eligible drafts at start'],
+      ['Interval', `${interval} seconds`],
+      ['Default', `${DEFAULT_INTERVAL_SECONDS / 60} minutes`],
     ],
   };
 }
