@@ -36,7 +36,9 @@ export class FollowUpsClient implements IFollowUpsClient {
       cache: 'no-store',
       signal: AbortSignal.any([signal, AbortSignal.timeout(15000)]),
     });
+
     const result = await response.json();
+
     if (!response.ok)
       throw new Error(
         typeof result?.error === 'string'
