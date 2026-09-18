@@ -4,7 +4,7 @@
 
 Before planning, implementing or reviewing any new feature or repository update, read and apply the `cohesive-architecture` skill. Its canonical installed entry point is `$CODEX_HOME/skills/cohesive-architecture/SKILL.md` (default: `~/.codex/skills/cohesive-architecture/SKILL.md`). If it is absent from the session's skill catalog, read that file directly. If the installation is missing, look for the named skill in the available skill locations and report the missing dependency rather than silently inventing replacement guidance.
 
-The skill owns architecture, responsibility boundaries, dependency design, scope and verification principles. This file supplies only repository-specific conventions, safeguards and commands. Do not duplicate the skill here. Explicit user instructions take precedence; apply the skill proportionately to the requested change.
+The skill owns architecture, human-readable code standards for frontend and backend, responsibility boundaries, dependency design, scope and verification principles. This file supplies only repository-specific conventions, safeguards and commands. Do not duplicate the skill here. Explicit user instructions take precedence; apply the skill proportionately to the requested change.
 
 ## Local conventions
 
