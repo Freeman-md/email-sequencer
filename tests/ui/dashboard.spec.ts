@@ -88,7 +88,7 @@ test('desktop states, controls and mobile preserve operational fields without ov
       () => document.documentElement.scrollWidth <= window.innerWidth,
     ),
   ).toBe(true);
-  await expect(page.getByText('Run started at', { exact: true })).toBeVisible();
+  await expect(page.getByText('Current timing', { exact: true })).toBeVisible();
   await expect(page.getByRole('button', { name: 'Stop Run' })).toBeVisible();
   await page.setViewportSize({ width: 1440, height: 1024 });
   state.run.phase = 'waiting';
