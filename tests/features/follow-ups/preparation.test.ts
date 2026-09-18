@@ -288,6 +288,28 @@ describe('preparation workflow', () => {
     expect(interactions.createFollowUpDraft).toHaveBeenCalledTimes(2);
     expect(JSON.stringify(service.snapshot())).not.toContain('private');
   });
+
+  it('stops with an actionable error when Airtable repeats a page cursor', async () => {
+    const { service, prospects, generator } = setup();
+    prospects.pageWithInteractions.mockResolvedValue({
+      ids: [prospect.id],
+      offset: 'repeated-page',
+    });
+
+    service.start();
+    await finished(service);
+
+    expect(prospects.pageWithInteractions.mock.calls).toEqual([
+      [undefined],
+      ['repeated-page'],
+    ]);
+    expect(generator.generate).toHaveBeenCalledTimes(1);
+    expect(service.snapshot()).toMatchObject({
+      status: 'error',
+      error:
+        'Preparation stopped because candidate records could not be read. Check Airtable access and field configuration. Drafts already confirmed remain saved.',
+    });
+  });
 });
 
 describe('preparation stop and limits', () => {

@@ -108,47 +108,73 @@ export class FollowUpPreparationService implements IFollowUpPreparationService {
 
   private async execute() {
     try {
-      let offset: string | undefined;
-      const seenOffsets = new Set<string>();
-      const seenProspects = new Set<string>();
-
-      while (this.canContinue()) {
-        const page = await this.prospects.pageWithInteractions(offset);
-        for (const id of page.ids) {
-          if (!this.canContinue()) {
-            break;
-          }
-          if (seenProspects.has(id)) {
-            continue;
-          }
-          seenProspects.add(id);
-          await this.prepare(id);
-        }
-        if (!this.canContinue()) {
-          break;
-        }
-        offset = page.offset;
-        if (!offset) {
-          break;
-        }
-        if (seenOffsets.has(offset)) {
-          throw new Error('Repeated Airtable page.');
-        }
-        seenOffsets.add(offset);
-      }
-      this.state.status = this.cancellation.signal.aborted
-        ? 'stopped'
-        : 'completed';
+      await this.processCandidatePages();
+      this.finishRun();
     } catch {
-      if (this.cancellation.signal.aborted) {
-        this.state.status = 'stopped';
+      this.handleExecutionFailure();
+    }
+  }
 
+  private async processCandidatePages() {
+    let offset: string | undefined;
+    const seenOffsets = new Set<string>();
+    const seenProspects = new Set<string>();
+
+    while (this.canContinue()) {
+      const page = await this.prospects.pageWithInteractions(offset);
+      await this.preparePage(page.ids, seenProspects);
+
+      if (!this.canContinue()) {
         return;
       }
-      this.state.status = 'error';
-      this.state.error =
-        'Preparation stopped because candidate records could not be read. Check Airtable access and field configuration. Drafts already confirmed remain saved.';
+      offset = this.nextPageOffset(page.offset, seenOffsets);
+      if (!offset) {
+        return;
+      }
     }
+  }
+
+  private async preparePage(ids: string[], seenProspects: Set<string>) {
+    for (const id of ids) {
+      if (!this.canContinue()) {
+        return;
+      }
+      if (seenProspects.has(id)) {
+        continue;
+      }
+      seenProspects.add(id);
+      await this.prepare(id);
+    }
+  }
+
+  private nextPageOffset(offset: string | undefined, seenOffsets: Set<string>) {
+    if (!offset) {
+      return undefined;
+    }
+    if (seenOffsets.has(offset)) {
+      throw new Error('Repeated Airtable page.');
+    }
+
+    seenOffsets.add(offset);
+
+    return offset;
+  }
+
+  private finishRun() {
+    this.state.status = this.cancellation.signal.aborted
+      ? 'stopped'
+      : 'completed';
+  }
+
+  private handleExecutionFailure() {
+    if (this.cancellation.signal.aborted) {
+      this.state.status = 'stopped';
+
+      return;
+    }
+    this.state.status = 'error';
+    this.state.error =
+      'Preparation stopped because candidate records could not be read. Check Airtable access and field configuration. Drafts already confirmed remain saved.';
   }
 
   private async prepare(id: string) {
