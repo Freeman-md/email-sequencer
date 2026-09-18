@@ -1,7 +1,3 @@
-'use client';
-
-import { useRouter } from 'next/navigation';
-
 import type { Connection, RunState } from '../types';
 
 export function MailboxManagement({
@@ -11,17 +7,10 @@ export function MailboxManagement({
   gmail: Connection | undefined;
   run: RunState;
 }) {
-  const router = useRouter();
   const connected = Boolean(gmail?.connected);
   const connectionLocked = run.status === 'running';
   const detail = gmail?.detail || 'No Gmail connection is available.';
   const actionLabel = connected ? 'Reconnect Gmail' : 'Connect Gmail';
-
-  function beginConnectionChange() {
-    if (!connectionLocked) {
-      router.push('/api/gmail/connect');
-    }
-  }
 
   return (
     <section className="mailbox-management" aria-labelledby="mailboxes-title">
@@ -33,14 +22,15 @@ export function MailboxManagement({
             existing connection.
           </p>
         </div>
-        <button
-          className="primary mailbox-action"
-          type="button"
-          disabled={connectionLocked}
-          onClick={beginConnectionChange}
-        >
-          {actionLabel}
-        </button>
+        {connectionLocked ? (
+          <button className="primary mailbox-action" type="button" disabled>
+            {actionLabel}
+          </button>
+        ) : (
+          <a className="primary mailbox-action" href="/api/gmail/connect">
+            {actionLabel}
+          </a>
+        )}
       </div>
 
       <section className="mailbox-connection" aria-label="Gmail connection">

@@ -179,6 +179,20 @@ test('mailbox navigation preserves the live run and locks connection changes', a
   await expect(
     page.getByText('Stop the active run before changing the Gmail connection.'),
   ).toBeVisible();
+  await page.screenshot({
+    path: 'output/playwright/mailboxes-desktop.png',
+    fullPage: true,
+  });
+  await page.setViewportSize({ width: 390, height: 1000 });
+  await page.screenshot({
+    path: 'output/playwright/mailboxes-mobile.png',
+    fullPage: true,
+  });
+  expect(
+    await page.evaluate(
+      () => document.documentElement.scrollWidth <= window.innerWidth,
+    ),
+  ).toBe(true);
 
   await page.getByRole('button', { name: 'Overview' }).click();
   await expect(
