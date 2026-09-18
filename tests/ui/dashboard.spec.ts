@@ -1,4 +1,4 @@
-import { test, expect } from '@playwright/test';
+import { test, expect, type Page } from '@playwright/test';
 import { initialPreparationState } from '../../src/features/follow-ups/types/preparation';
 import { initialRunState } from '../../src/features/sequencer/constants/run';
 import type { DashboardState } from '../../src/features/sequencer/types';
@@ -33,6 +33,10 @@ function fixture(): DashboardState {
     serverNow: '2026-09-09T12:10:42.000Z',
     run: { ...initialRunState(), lastSent },
   };
+}
+
+async function openFollowUpPreparation(page: Page) {
+  await page.getByText('Prepare follow-up drafts', { exact: true }).click();
 }
 
 test('desktop states, controls and mobile preserve operational fields without overflow', async ({
@@ -354,6 +358,7 @@ test('prepares drafts, protects command results from stale polling and displays 
   });
   await page.goto('/');
   await pending;
+  await openFollowUpPreparation(page);
   await page.getByLabel('Draft limit (optional)').fill('0');
   await expect(
     page.getByRole('button', { name: 'Prepare Follow-Ups' }),
@@ -431,10 +436,12 @@ test('refresh retains the preparation limit and Stop, and stale polls cannot und
     } else await route.fulfill({ json: state });
   });
   await page.goto('/');
+  await openFollowUpPreparation(page);
   await expect(
     page.getByRole('button', { name: 'Stop Preparation' }),
   ).toBeEnabled();
   await page.reload();
+  await openFollowUpPreparation(page);
   await expect(
     page.getByRole('button', { name: 'Stop Preparation' }),
   ).toBeEnabled();
