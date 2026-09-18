@@ -22,6 +22,7 @@ export function SequencerPanel({
   oauthFailed = false,
   oauthFailureDetail,
   renderMailboxes,
+  renderSchedules,
 }: {
   children?: ReactNode;
   initial: DashboardState | null;
@@ -29,10 +30,11 @@ export function SequencerPanel({
   oauthFailed?: boolean;
   oauthFailureDetail?: string;
   renderMailboxes: (active: boolean) => ReactNode;
+  renderSchedules: (active: boolean) => ReactNode;
 }) {
-  const [activeView, setActiveView] = useState<'overview' | 'mailboxes'>(
-    'overview',
-  );
+  const [activeView, setActiveView] = useState<
+    'overview' | 'mailboxes' | 'schedules'
+  >('overview');
   const { data, error, busy, command, clockSample, reconcile } =
     useSequencer(initial);
   const run = data?.run ?? initialRunState();
@@ -72,6 +74,9 @@ export function SequencerPanel({
       </div>
       <div hidden={activeView !== 'mailboxes'}>
         {renderMailboxes(run.status === 'running')}
+      </div>
+      <div hidden={activeView !== 'schedules'}>
+        {renderSchedules(run.status === 'running')}
       </div>
     </main>
   );

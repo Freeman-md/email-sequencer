@@ -2,6 +2,10 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { SequencerRuntime } from '@/features/sequencer/server/runtime/sequencer-runtime';
 import { SequencerService } from '@/features/sequencer/server/services/sequencer.service';
+import {
+  NEW_SCHEDULE_DEFAULTS,
+  windowOpen,
+} from '@/modules/outreach/schedules';
 
 import type { Interaction } from '@/features/sequencer/server/types/interaction';
 import type { SendResult } from '@/infrastructure/email/types/send-result';
@@ -39,9 +43,24 @@ const candidate: DraftCandidate = {
   initialInteractionIds: [],
 };
 const flush = async () => {
-  for (let i = 0; i < 60; i++) await Promise.resolve();
+  for (let i = 0; i < 100; i++) await Promise.resolve();
 };
-function setup() {
+function setup(intervalSeconds = 1) {
+  const schedule = {
+    ...NEW_SCHEDULE_DEFAULTS,
+    name: 'Synthetic',
+    id: 'recSchedule',
+    selected: true,
+    automaticSending: false,
+    lastTriggerKey: '',
+    intervalSeconds,
+  };
+  const schedules = {
+    capture: vi.fn().mockResolvedValue(schedule),
+    verify: vi.fn().mockResolvedValue(undefined),
+    status: vi.fn(),
+    claim: vi.fn(),
+  };
   const findNextDraft = vi
     .fn()
     .mockResolvedValueOnce(candidate)
@@ -96,6 +115,8 @@ function setup() {
 
   return {
     state,
+    schedule,
+    schedules,
     findContactById,
     runtime,
     findNextDraft,
@@ -113,12 +134,146 @@ function setup() {
       runtime,
       mailboxes,
       attempts,
+      schedules,
     ),
   };
 }
 beforeEach(() => {
   vi.useFakeTimers();
   vi.setSystemTime(new Date(startedAt));
+});
+
+it('blocks manual starts without a valid selected window and before reading drafts', async () => {
+  const { runner, schedules, findNextDraft, send } = setup();
+  schedules.capture.mockRejectedValue(new Error('No schedule is selected.'));
+  runner.start();
+  await flush();
+  expect(send).not.toHaveBeenCalled();
+  expect(findNextDraft).not.toHaveBeenCalled();
+  expect(runner.snapshot().errors[0]?.message).toContain('No schedule');
+});
+
+it('wakes the interval at exclusive closing without fetching or submitting another draft', async () => {
+  const { runner, schedule, findNextDraft, send } = setup(1200);
+  vi.setSystemTime(new Date('2026-09-09T15:59:59Z'));
+  runner.start();
+  await flush();
+  expect(send).toHaveBeenCalledTimes(1);
+  await vi.advanceTimersByTimeAsync(1000);
+  expect(windowOpen(schedule, new Date())).toBe(false);
+  expect(findNextDraft).toHaveBeenCalledTimes(1);
+  expect(runner.isActive()).toBe(false);
+  expect(runner.snapshot().errors[0]?.message).toContain('closed');
+});
+
+it('resolves a reserved attempt as a non-send when slow provider preflight reaches closing', async () => {
+  const { runner, send, attempts, confirmSent, state } = setup();
+  send.mockImplementationOnce(async (...args: unknown[]) => {
+    vi.setSystemTime(new Date('2026-09-09T16:00:00Z'));
+    const email = args[0] as Interaction;
+
+    try {
+      await email.beforeSubmit!();
+    } catch (error) {
+      return {
+        kind: 'definite',
+        submissionPrevented: true,
+        message: (error as Error).message,
+      };
+    }
+    throw new Error('Unexpected submission permitted');
+  });
+  runner.start();
+  await flush();
+  expect(attempts.resolve).toHaveBeenCalledTimes(1);
+  expect(state.pending).toBeNull();
+  expect(confirmSent).not.toHaveBeenCalled();
+  expect(runner.isActive()).toBe(false);
+});
+
+it('finishes confirmed in-flight submission after closing, including durable and Airtable writes', async () => {
+  const { runner, send, confirmSent, attempts, findNextDraft } = setup();
+  send.mockImplementationOnce(async () => {
+    vi.setSystemTime(new Date('2026-09-09T16:00:01Z'));
+
+    return {
+      kind: 'confirmed',
+      sentAt: new Date().toISOString(),
+      gmailMessageId: 'message',
+      gmailThreadId: 'thread',
+    };
+  });
+  runner.start();
+  await flush();
+  await vi.runAllTimersAsync();
+  expect(attempts.confirm).toHaveBeenCalledTimes(1);
+  expect(confirmSent).toHaveBeenCalledTimes(1);
+  expect(attempts.resolve).toHaveBeenCalledTimes(1);
+  expect(findNextDraft).toHaveBeenCalledTimes(1);
+});
+
+it('stops before the next submission on direct operational schedule changes', async () => {
+  const { runner, schedules, send, findNextDraft } = setup();
+  runner.start();
+  await flush();
+  schedules.verify.mockRejectedValue(
+    new Error('Schedule configuration changed.'),
+  );
+  await vi.runAllTimersAsync();
+  expect(send).toHaveBeenCalledTimes(1);
+  expect(findNextDraft).toHaveBeenCalledTimes(1);
+  expect(runner.snapshot().errors[0]?.message).toContain(
+    'configuration changed',
+  );
+});
+
+it('claims an automatic occurrence before draft processing and never sends on an unconfirmed claim', async () => {
+  const { runner, schedule, schedules, findNextDraft, send } = setup();
+  schedule.automaticSending = true;
+  vi.setSystemTime(new Date('2026-09-09T12:00:00Z'));
+  schedules.claim.mockRejectedValue(new Error('Claim was not confirmed.'));
+  await runner.startAutomatic('recSchedule:2026-09-09:13:00', Date.now());
+  await flush();
+  expect(schedules.claim).toHaveBeenCalledTimes(1);
+  expect(send).not.toHaveBeenCalled();
+  expect(findNextDraft).not.toHaveBeenCalled();
+});
+
+it.each(['unavailable connections', 'unresolved attempt'])(
+  'never claims an automatic occurrence with %s',
+  async (failure) => {
+    const { runner, schedules, state, check, findNextDraft } = setup();
+    if (failure === 'unavailable connections') {
+      check.mockRejectedValue(new Error('Mailbox unavailable.'));
+    } else {
+      state.pending = {
+        id: 'unresolved',
+        interactionId: 'recEarlier',
+        mailboxId: 'recMailboxA',
+        mailboxEmail: 'operator@example.com',
+        reservedAt: startedAt,
+      };
+    }
+    await runner.startAutomatic('recSchedule:2026-09-09:13:00', Date.now());
+    await flush();
+    expect(schedules.claim).not.toHaveBeenCalled();
+    expect(findNextDraft).not.toHaveBeenCalled();
+  },
+);
+
+it('never dispatches a late claim and preserves the claimed occurrence without replay', async () => {
+  const { runner, schedules, findNextDraft, send } = setup();
+  schedules.claim.mockImplementationOnce(async () => {
+    vi.advanceTimersByTime(60000);
+  });
+  await runner.startAutomatic('recSchedule:2026-09-09:13:00', Date.now());
+  await flush();
+  expect(schedules.claim).toHaveBeenCalledTimes(1);
+  expect(findNextDraft).not.toHaveBeenCalled();
+  expect(send).not.toHaveBeenCalled();
+  expect(runner.snapshot().errors[0]?.message).toContain(
+    'Claim completed after',
+  );
 });
 
 it('advances the persisted allocation cursor on reservation and skips unavailable accounts', async () => {
@@ -150,7 +305,7 @@ it('advances the persisted allocation cursor on reservation and skips unavailabl
   });
   state.lastAllocatedMailboxId = 'recMailboxA';
   send.mockResolvedValue({ kind: 'definite', message: 'Rejected' });
-  runner.start(1);
+  runner.start();
   await vi.runAllTimersAsync();
   expect(send).toHaveBeenCalledWith(
     expect.objectContaining({ mailboxId: 'recMailboxC' }),
@@ -160,7 +315,7 @@ it('advances the persisted allocation cursor on reservation and skips unavailabl
     true,
   );
   findNextDraft.mockResolvedValueOnce(candidate);
-  runner.start(1);
+  runner.start();
   await vi.runAllTimersAsync();
   expect(send).toHaveBeenLastCalledWith(
     expect.objectContaining({ mailboxId: 'recMailboxA' }),
@@ -216,7 +371,7 @@ it('uses the root mailbox for follow-ups without advancing allocation', async ()
       },
     ],
   });
-  runner.start(1);
+  runner.start();
   await vi.runAllTimersAsync();
   expect(findById).toHaveBeenCalledWith('recRoot');
   expect(send).toHaveBeenCalledWith(
@@ -268,7 +423,7 @@ it.each([
       .mockReset()
       .mockResolvedValueOnce(draft)
       .mockResolvedValue(null);
-    runner.start(1);
+    runner.start();
     await vi.runAllTimersAsync();
     expect(send).not.toHaveBeenCalled();
     expect(attempts.reserve).not.toHaveBeenCalled();
@@ -309,7 +464,7 @@ it.each([
         ? []
         : [failure === 'unavailable-owner' ? 'recDisconnected' : 'recMailboxA'],
   });
-  runner.start(1);
+  runner.start();
   await vi.runAllTimersAsync();
   expect(send).not.toHaveBeenCalled();
   expect(confirmSent).not.toHaveBeenCalled();
@@ -320,7 +475,7 @@ it.each([
 it('stops before submission if there is no available sender or a reservation cannot be saved', async () => {
   const first = setup();
   first.mailboxes.getState.mockResolvedValue({ mailboxes: [] });
-  first.runner.start(1);
+  first.runner.start();
   await flush();
   expect(first.send).not.toHaveBeenCalled();
   expect(first.runner.snapshot().errors[0]?.message).toContain(
@@ -330,7 +485,7 @@ it('stops before submission if there is no available sender or a reservation can
   second.attempts.reserve.mockRejectedValue(
     new Error('Persistent storage unavailable'),
   );
-  second.runner.start(1);
+  second.runner.start();
   await flush();
   expect(second.send).not.toHaveBeenCalled();
   expect(second.runner.snapshot().errors[0]?.message).toContain(
@@ -352,7 +507,7 @@ it('blocks a new run on a durable unresolved attempt and requires particular-att
       gmailThreadId: 'previous-thread',
     },
   };
-  runner.start(1);
+  runner.start();
   await flush();
   expect(send).not.toHaveBeenCalled();
   expect(findNextDraft).not.toHaveBeenCalled();
@@ -394,7 +549,7 @@ it('persists Gmail confirmation before Airtable and retains it on completion fai
     expect(state.pending?.confirmation?.gmailMessageId).toBe('message-id');
     throw new Error('Synthetic Airtable outage');
   });
-  runner.start(1);
+  runner.start();
   await flush();
   expect(attempts.resolve).not.toHaveBeenCalled();
   expect(state.pending?.confirmation?.gmailMessageId).toBe('message-id');
@@ -406,11 +561,14 @@ afterEach(() => vi.useRealTimers());
 
 describe('one-at-a-time run lifecycle', () => {
   it('fixes runStartedAt and waits the full interval before querying again', async () => {
-    const { runner, findNextDraft, confirmSent, send } = setup();
-    runner.start(300);
+    const { runner, findNextDraft, confirmSent, send } = setup(300);
+    runner.start();
     await flush();
     expect(findNextDraft).toHaveBeenCalledTimes(1);
-    expect(send).toHaveBeenCalledWith(interaction);
+    expect(send).toHaveBeenCalledWith({
+      ...interaction,
+      beforeSubmit: expect.any(Function),
+    });
     expect(confirmSent).toHaveBeenCalledWith(interaction.id, {
       mailboxId: interaction.mailboxId,
       sentAt: '2026-09-09T12:00:01.000Z',
@@ -444,7 +602,7 @@ describe('one-at-a-time run lifecycle', () => {
         resolveSend = resolve;
       }),
     );
-    runner.start(300);
+    runner.start();
     await flush();
     expect(confirmSent).not.toHaveBeenCalled();
     expect(runner.snapshot().phase).toBe('sending');
@@ -471,7 +629,7 @@ describe('one-at-a-time run lifecycle', () => {
       excluded.has(interaction.id) ? null : candidate,
     );
     send.mockResolvedValue({ kind: 'definite', message: 'Rejected' });
-    runner.start(1);
+    runner.start();
     await vi.runAllTimersAsync();
     expect(send).toHaveBeenCalledTimes(1);
     expect(confirmSent).not.toHaveBeenCalled();
@@ -489,7 +647,7 @@ describe('one-at-a-time run lifecycle', () => {
   it('stops on an uncertain outcome without a retry or write', async () => {
     const { runner, send, findNextDraft, confirmSent } = setup();
     send.mockResolvedValue({ kind: 'uncertain', message: 'Timed out' });
-    runner.start(300);
+    runner.start();
     await vi.runAllTimersAsync();
     expect(findNextDraft).toHaveBeenCalledTimes(1);
     expect(send).toHaveBeenCalledTimes(1);
@@ -510,7 +668,7 @@ describe('one-at-a-time run lifecycle', () => {
   it('treats an unexpected send exception as uncertain', async () => {
     const { runner, send } = setup();
     send.mockRejectedValue(new Error('Unexpected'));
-    runner.start(1);
+    runner.start();
     await flush();
     expect(runner.snapshot().errors[0]?.kind).toBe('uncertain');
   });
@@ -518,7 +676,7 @@ describe('one-at-a-time run lifecycle', () => {
   it('stops for reconciliation if Gmail succeeds but Airtable write fails', async () => {
     const { runner, confirmSent, findNextDraft } = setup();
     confirmSent.mockRejectedValue(new Error('Unavailable'));
-    runner.start(1);
+    runner.start();
     await vi.runAllTimersAsync();
     expect(findNextDraft).toHaveBeenCalledTimes(1);
     expect(runner.snapshot()).toMatchObject({
@@ -537,8 +695,8 @@ describe('one-at-a-time run lifecycle', () => {
         finish = resolve;
       }),
     );
-    expect(runner.start(300).status).toBe('running');
-    expect(() => runner.start(300)).toThrow('already active');
+    expect(runner.start().status).toBe('running');
+    expect(() => runner.start()).toThrow('already active');
     runner.stop();
     finish();
     await flush();
@@ -547,7 +705,7 @@ describe('one-at-a-time run lifecycle', () => {
 
   it('cancels the interval without fetching another record', async () => {
     const { runner, findNextDraft } = setup();
-    runner.start(300);
+    runner.start();
     await flush();
     runner.stop();
     await vi.runAllTimersAsync();
@@ -567,10 +725,10 @@ describe('one-at-a-time run lifecycle', () => {
         finish = resolve;
       }),
     );
-    runner.start(300);
+    runner.start();
     await flush();
     runner.stop();
-    expect(() => runner.start(300)).toThrow('already active');
+    expect(() => runner.start()).toThrow('already active');
     finish({
       kind: 'confirmed',
       gmailMessageId: 'gmail-id',
@@ -589,7 +747,7 @@ describe('one-at-a-time run lifecycle', () => {
       ...candidate,
       createdAt: '2026-09-09T12:00:00.001Z',
     });
-    runner.start(300);
+    runner.start();
     await flush();
     expect(send).not.toHaveBeenCalled();
     expect(runner.snapshot().status).toBe('error');
@@ -598,11 +756,11 @@ describe('one-at-a-time run lifecycle', () => {
   it('a new run has a new cutoff and can revisit prior definite failures', async () => {
     const { runner, findNextDraft, send } = setup();
     send.mockResolvedValue({ kind: 'definite', message: 'Rejected' });
-    runner.start(1);
+    runner.start();
     await vi.runAllTimersAsync();
     vi.setSystemTime(new Date('2026-09-09T13:00:00.000Z'));
     findNextDraft.mockResolvedValueOnce(candidate);
-    runner.start(1);
+    runner.start();
     await vi.runAllTimersAsync();
     expect(send).toHaveBeenCalledTimes(2);
     expect(runner.snapshot().runStartedAt).toBe('2026-09-09T13:00:00.000Z');
@@ -622,7 +780,7 @@ describe('one-at-a-time run lifecycle', () => {
       email: '',
     });
 
-    runner.start(1);
+    runner.start();
     await vi.runAllTimersAsync();
 
     expect(send).toHaveBeenCalledTimes(1);
@@ -641,7 +799,7 @@ describe('one-at-a-time run lifecycle', () => {
       }),
     );
 
-    runner.start(1);
+    runner.start();
     await flush();
     runner.stop();
     finish({
@@ -662,20 +820,13 @@ describe('one-at-a-time run lifecycle', () => {
       .mockReset()
       .mockResolvedValue({ ...candidate, prospectIds: ['recOne', 'recTwo'] });
 
-    runner.start(1);
+    runner.start();
     await flush();
 
     expect(findContactById).not.toHaveBeenCalled();
     expect(send).not.toHaveBeenCalled();
     expect(runner.snapshot().errors[0]?.message).toContain('exactly one');
   });
-
-  it.each([0, -1, 1.5, NaN, Infinity, 86401])(
-    'rejects invalid interval %s',
-    (interval) => {
-      expect(() => setup().runner.start(interval)).toThrow('Interval Seconds');
-    },
-  );
 });
 
 it('rechecks Do Not Contact for an existing draft and continues without sending or completing it', async () => {
@@ -692,7 +843,7 @@ it('rechecks Do Not Contact for an existing draft and continues without sending 
     email: 'maya@example.com',
     doNotContact: true,
   });
-  runner.start(1);
+  runner.start();
   await flush();
   expect(send).toHaveBeenCalledTimes(1);
   expect(send).toHaveBeenCalledWith(

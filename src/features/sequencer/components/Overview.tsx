@@ -60,6 +60,41 @@ export function Overview({
         Automatic distribution: new conversations rotate across available
         mailboxes. Follow-ups always use their original sender.
       </p>
+      <section className="schedule-summary" aria-label="Selected schedule">
+        {data?.schedule.selected ? (
+          <>
+            <h2>{data.schedule.selected.name}</h2>
+            <p>
+              {data.schedule.selected.days.join(', ')} ·{' '}
+              {data.schedule.selected.opensAt}–{data.schedule.selected.closesAt}{' '}
+              · {data.schedule.selected.timezone}
+            </p>
+            <p>
+              Automatic sending{' '}
+              {data.schedule.selected.automaticSending ? 'on' : 'off'} ·
+              Interval {data.schedule.selected.intervalSeconds} seconds
+            </p>
+            {data.schedule.nextTriggerAt && (
+              <p>
+                Next automatic trigger:{' '}
+                {new Date(data.schedule.nextTriggerAt).toLocaleString(
+                  undefined,
+                  { timeZone: data.schedule.selected.timezone },
+                )}{' '}
+                ({data.schedule.selected.timezone})
+              </p>
+            )}
+          </>
+        ) : (
+          <p role="alert">
+            {data?.schedule.error ??
+              'Schedule configuration unavailable. Sending blocked.'}
+          </p>
+        )}
+        {data?.schedule.schedulerError && (
+          <p role="alert">{data.schedule.schedulerError}</p>
+        )}
+      </section>
       {data?.pendingAttempt && run.status !== 'running' && (
         <SendReconciliation
           key={data.pendingAttempt.id}

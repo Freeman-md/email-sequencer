@@ -1,6 +1,8 @@
 import 'server-only';
 
 import { MailboxesService } from '@/features/mailboxes/server/service';
+import { SchedulesService } from '@/features/schedules/server/service';
+import { SendingScheduler } from './scheduler';
 import { SequencerRuntime } from '@/features/sequencer/server/runtime/sequencer-runtime';
 import { ConnectionsService } from '@/features/sequencer/server/services/connections.service';
 import { SequencerService } from '@/features/sequencer/server/services/sequencer.service';
@@ -21,7 +23,9 @@ function composeServices() {
     interactions,
     prospects,
     mailboxes: repository,
+    schedules: scheduleRepository,
   } = composeOutreachRepositories(airtable);
+  const schedules = new SchedulesService(scheduleRepository, runtime);
   const mailboxes = new MailboxesService(
     repository,
     mailboxTokens,
@@ -43,9 +47,16 @@ function composeServices() {
     runtime,
     mailboxes,
     attempts,
+    schedules,
   );
+  const scheduler = new SendingScheduler(schedules, sequencer, (error) =>
+    schedules.setSchedulerError(error),
+  );
+  schedules.setChangeListener(() => {
+    void scheduler.evaluate();
+  });
 
-  return { sequencer, connections, mailboxes };
+  return { sequencer, connections, mailboxes, schedules, scheduler };
 }
 
 const processState = globalThis as typeof globalThis & {

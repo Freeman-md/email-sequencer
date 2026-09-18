@@ -150,7 +150,21 @@ export class GmailClient implements IGmailClient {
     raw: string,
     token: string,
     threadId?: string,
+    beforeSubmit?: () => Promise<void>,
   ): Promise<SendResult> {
+    try {
+      await beforeSubmit?.();
+    } catch (error) {
+      return {
+        kind: 'definite',
+        submissionPrevented: true,
+        message:
+          error instanceof Error
+            ? error.message
+            : 'Submission permission could not be verified. Draft unchanged.',
+      };
+    }
+
     // Use fetch directly: automatic auth-client retries can duplicate a send.
     try {
       const response = await this.fetchRequest(

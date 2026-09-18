@@ -18,8 +18,8 @@ export class SequencerClient implements ISequencerClient {
     );
   }
 
-  start(intervalSeconds: number, signal: AbortSignal) {
-    return this.mutate('start', { intervalSeconds }, signal);
+  start(signal: AbortSignal) {
+    return this.mutate('start', {}, signal);
   }
 
   stop(signal: AbortSignal) {

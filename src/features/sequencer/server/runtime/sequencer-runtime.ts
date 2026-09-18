@@ -28,6 +28,10 @@ export class SequencerRuntime {
     return this.stopping;
   }
 
+  configureInterval(intervalSeconds: number) {
+    this.state.intervalSeconds = intervalSeconds;
+  }
+
   excludedIds(): ReadonlySet<string> {
     return new Set(this.excluded);
   }
@@ -83,7 +87,7 @@ export class SequencerRuntime {
   beginConnectionChange() {
     if (this.active || this.connectionChanging) {
       throw new ConnectionChangeBlockedError(
-        'Stop the run before changing Gmail.',
+        'Stop the run before changing sending connections or the selected schedule.',
       );
     }
 
@@ -124,19 +128,26 @@ export class SequencerRuntime {
     this.state.status = 'completed';
   }
 
-  async wait() {
+  async wait(closesAt?: Date) {
     if (this.stopping) return;
 
     this.state.phase = 'waiting';
+    const duration = Math.max(
+      0,
+      Math.min(
+        this.state.intervalSeconds * 1000,
+        closesAt ? closesAt.getTime() - this.now().getTime() : Infinity,
+      ),
+    );
     this.state.nextSendAt = new Date(
-      this.now().getTime() + this.state.intervalSeconds * 1000,
+      this.now().getTime() + duration,
     ).toISOString();
 
     await new Promise<void>((resolve) => {
       const timer = setTimeout(() => {
         this.wake = undefined;
         resolve();
-      }, this.state.intervalSeconds * 1000);
+      }, duration);
 
       this.wake = () => {
         clearTimeout(timer);

@@ -5,5 +5,5 @@ export type SendResult =
       gmailMessageId: string;
       gmailThreadId: string;
     }
-  | { kind: 'definite'; message: string }
+  | { kind: 'definite'; message: string; submissionPrevented?: boolean }
   | { kind: 'uncertain'; message: string };

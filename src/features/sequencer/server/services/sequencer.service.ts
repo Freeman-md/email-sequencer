@@ -1,6 +1,11 @@
 import 'server-only';
 
 import { reconciliationGuidance } from '@/infrastructure/send-attempts/store';
+import {
+  triggerKey,
+  windowOpen,
+  windowClosesAt,
+} from '@/modules/outreach/schedules';
 
 import {
   allocateMailbox,
@@ -29,6 +34,9 @@ import type {
   IDraftQueueRepository,
 } from '@/modules/outreach/interactions';
 import type { IProspectContactRepository } from '@/modules/outreach/prospects';
+import type { ISendingSchedule, Schedule } from '@/modules/outreach/schedules';
+
+class RunStoppedBeforeSubmissionError extends Error {}
 
 export class SequencerService implements ISequencerService {
   constructor(
@@ -39,6 +47,7 @@ export class SequencerService implements ISequencerService {
     private readonly runtime: SequencerRuntime,
     private readonly mailboxes: ISenderMailboxes,
     private readonly attempts: ISendAttemptStore,
+    private readonly schedules: ISendingSchedule,
     private readonly now: () => Date = () => new Date(),
   ) {}
 
@@ -58,14 +67,20 @@ export class SequencerService implements ISequencerService {
       run: this.snapshot(),
       serverNow: this.now().toISOString(),
       pendingAttempt: (await this.attempts.read()).pending,
+      schedule: await this.schedules.status(),
     };
   }
 
-  start(intervalSeconds: number) {
-    const runStartedAt = this.runtime.begin(intervalSeconds);
+  start() {
+    const runStartedAt = this.runtime.begin(1200);
     void this.execute(runStartedAt);
 
     return this.snapshot();
+  }
+
+  async startAutomatic(key: string, minute: number) {
+    const runStartedAt = this.runtime.begin(1200);
+    void this.execute(runStartedAt, { key, minute });
   }
 
   stop() {
@@ -124,9 +139,11 @@ export class SequencerService implements ISequencerService {
 
   private async nextInteraction(
     runStartedAt: string,
+    schedule: Schedule,
   ): Promise<Interaction | null> {
     // Recipient email lives on a linked table, so resolve one candidate at a time.
     while (!this.runtime.isStopping()) {
+      this.assertRunWindowOpen(schedule);
       const excluded = this.runtime.excludedIds();
       const candidate = await this.interactions.findNextDraft(
         runStartedAt,
@@ -136,6 +153,7 @@ export class SequencerService implements ISequencerService {
       if (this.runtime.isStopping() || !candidate) {
         return null;
       }
+      this.assertRunWindowOpen(schedule);
       const prospectId = this.validateQueueCandidate(
         candidate,
         runStartedAt,
@@ -147,6 +165,7 @@ export class SequencerService implements ISequencerService {
       if (this.runtime.isStopping()) {
         return null;
       }
+      this.assertRunWindowOpen(schedule);
       if (prospect.doNotContact) {
         this.runtime.rejected({
           kind: 'definite',
@@ -264,7 +283,10 @@ export class SequencerService implements ISequencerService {
     });
   }
 
-  private async execute(runStartedAt: string) {
+  private async execute(
+    runStartedAt: string,
+    occurrence?: { key: string; minute: number },
+  ) {
     try {
       const pending = (await this.attempts.read()).pending;
       if (pending) {
@@ -276,11 +298,12 @@ export class SequencerService implements ISequencerService {
 
         return;
       }
-      await this.connections.requireReady();
+      const schedule = await this.prepareRunSchedule(occurrence);
 
       while (!this.runtime.isStopping()) {
+        await this.assertSubmissionAllowed(schedule);
         this.runtime.fetching();
-        const interaction = await this.nextInteraction(runStartedAt);
+        const interaction = await this.nextInteraction(runStartedAt, schedule);
 
         if (this.runtime.isStopping()) {
           break;
@@ -290,13 +313,16 @@ export class SequencerService implements ISequencerService {
           break;
         }
 
-        if (!(await this.sendInteraction(interaction))) {
+        if (!(await this.sendInteraction(interaction, schedule))) {
           break;
         }
 
-        await this.runtime.wait();
+        await this.runtime.wait(windowClosesAt(schedule, this.now()));
       }
     } catch (error) {
+      if (error instanceof RunStoppedBeforeSubmissionError) {
+        return;
+      }
       this.runtime.halt({
         kind: 'system',
         message:
@@ -309,7 +335,60 @@ export class SequencerService implements ISequencerService {
     }
   }
 
-  private async sendInteraction(interaction: Interaction): Promise<boolean> {
+  private async prepareRunSchedule(occurrence?: {
+    key: string;
+    minute: number;
+  }) {
+    await this.connections.requireReady();
+    const schedule = await this.schedules.capture();
+    await this.assertSubmissionAllowed(schedule);
+    this.runtime.configureInterval(schedule.intervalSeconds);
+    if (occurrence) {
+      if (
+        triggerKey(schedule, this.now()) !== occurrence.key ||
+        Math.floor(this.now().getTime() / 60000) * 60000 !== occurrence.minute
+      ) {
+        throw new Error(
+          'Automatic trigger minute was missed. Occurrence skipped.',
+        );
+      }
+      await this.schedules.claim(schedule, occurrence.key);
+      if (
+        Math.floor(this.now().getTime() / 60000) * 60000 !==
+        occurrence.minute
+      ) {
+        throw new Error(
+          'Claim completed after the trigger minute. Occurrence skipped; never replay.',
+        );
+      }
+    }
+
+    return schedule;
+  }
+
+  private async assertSubmissionAllowed(schedule: Schedule) {
+    await this.schedules.verify(schedule);
+    if (this.runtime.isStopping()) {
+      throw new RunStoppedBeforeSubmissionError(
+        'Run stopped before submission. Draft unchanged.',
+      );
+    }
+    this.assertRunWindowOpen(schedule);
+  }
+
+  private assertRunWindowOpen(schedule: Schedule) {
+    if (!windowOpen(schedule, this.now())) {
+      throw new Error(
+        'Sending window closed before submission. Draft unchanged.',
+      );
+    }
+  }
+
+  private async sendInteraction(
+    interaction: Interaction,
+    schedule: Schedule,
+  ): Promise<boolean> {
+    await this.assertSubmissionAllowed(schedule);
     if (!interaction.mailboxId || !interaction.mailboxEmail) {
       throw new Error(
         'No verified sender selected. Run stopped without sending.',
@@ -339,7 +418,10 @@ export class SequencerService implements ISequencerService {
       return false;
     }
     this.runtime.sending(summary);
-    const result = await this.submit(interaction);
+    const result = await this.submit({
+      ...interaction,
+      beforeSubmit: () => this.assertSubmissionAllowed(schedule),
+    });
     if (result.kind === 'uncertain') {
       this.runtime.halt({
         ...result,
@@ -352,6 +434,13 @@ export class SequencerService implements ISequencerService {
     if (result.kind === 'definite') {
       await this.attempts.resolve(attempt.id);
       this.runtime.rejected({ ...result, interactionId: interaction.id });
+      if (result.submissionPrevented) {
+        if (!this.runtime.isStopping()) {
+          this.runtime.halt({ kind: 'system', message: result.message });
+        }
+
+        return false;
+      }
 
       return true;
     }

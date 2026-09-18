@@ -1,6 +1,6 @@
 # Email Sequencer — V1
 
-A single-operator Next.js dashboard that sends eligible Airtable Interactions through multiple Gmail mailboxes. Airtable is the operational source of truth; the runner lives in one long-lived Node process. No additional database, worker or scheduler.
+A single-operator Next.js dashboard that sends eligible Airtable Interactions through multiple Gmail mailboxes within a selected sending schedule. Airtable is the operational source of truth; the sequential runner and scheduler live in one long-lived Node process. No additional database, worker or scheduling service.
 
 ## Local setup
 
@@ -13,7 +13,7 @@ cp .env.example .env.local
 npm run dev
 ```
 
-Open http://localhost:3000. The browser asks for HTTP Basic authentication: username **operator**, password **APP_PASSWORD**. Click **Connect Gmail**, complete Google consent, set **Interval Seconds** (default 300), then **Start Run** when you intend to send the real Draft queue.
+Open http://localhost:3000. The browser asks for HTTP Basic authentication: username **operator**, password **APP_PASSWORD**. Connect a mailbox, then open **Schedules**, create a sending window and select it. New schedules default to weekdays, 09:00–17:00 Europe/London and 1200 seconds (20 minutes), unselected with automatic sending off. Manual **Start Run** uses the selected schedule's interval and requires an open window. Development never automatically starts sending.
 
 ### Airtable
 
@@ -66,6 +66,30 @@ Every required variable is in `.env.example`:
 Configuration is validated at the server boundary. Missing configuration produces named setup errors without printing values. Build does not require credentials. Never use `NEXT_PUBLIC_*` for these variables.
 
 ## Run behaviour
+
+### Schedules and automatic starts
+
+The Schedules table is `tblepQKaVzjcENFF6` in the existing base. Created and verified field identifiers:
+
+| Field                                | Identifier          |
+| ------------------------------------ | ------------------- |
+| Name (primary text)                  | `fldUR3O5jFHONNpOx` |
+| Days (Monday–Sunday multiple select) | `flddtTFR7UUTFzu2z` |
+| Opens At                             | `fldkHDy23mwpdcwjS` |
+| Closes At                            | `fldi8WGCkSmek4UkK` |
+| Timezone                             | `fldbIElsJ6ySbOrZ5` |
+| Interval Seconds (integer)           | `fldddTIwbzYn8GJ69` |
+| Selected                             | `fldTQiJpDTS5onsvo` |
+| Automatic Sending                    | `fldRf0Oa7yDEhBnlx` |
+| Last Trigger Key                     | `fldHToti3ei9c8eNq` |
+
+No schedules are seeded or enabled. Create, edit, select, toggle automatic starts and confirm deletion in **Schedules**. Selection changes are serialized, writes and the final single selection are verified. Partial/ambiguous selection fails closed with Airtable repair guidance; explicitly select again after repair. Zero/multiple selections, invalid selected configuration and read failures block all sends. Overnight windows are unsupported; intervals must be whole seconds from 1 to 86400. Deleting the selected schedule leaves no selection.
+
+Node instrumentation initializes one scheduler on production server startup, without a browser request. It refreshes every 30 seconds, serializes evaluations and refreshes after app-managed changes. Builds, development and tests cannot initialize automatic work; `EMAIL_SEQUENCER_SCHEDULER_DISABLED=1` is an additional production kill switch and is explicitly set during builds and isolated UI verification. Scheduler failures appear as schedule status; management remains accessible. Restart the production Node process after upgrading. Existing persistent credentials and the attempt journal remain required.
+
+Only the selected schedule with Automatic Sending on can start automatically, at opening and subsequent local hours before closing (09:30–17:00 means 09:30 through 16:30). Starts must be dispatched in that minute; late/missed, busy, blocked and unavailable occurrences are skipped, not queued. Startup never catches up or resumes a run. Last Trigger Key claims and verifies the schedule/local-date/time occurrence before draft processing; unconfirmed claims are never retried. Leave this field application-managed. Timezone conversion uses IANA rules; nonexistent times are skipped and repeated local times never trigger twice, including across restart. This is single-process protection, not distributed locking.
+
+Both manual and automatic runs capture schedule identity and operational configuration and validate it before sends, including immediately before the actual Gmail request after token refresh/thread/MIME preparation. Closing is exclusive; interval waits wake at closing, further processing stops, and in-flight submissions finish their confirmation writes. A denied pre-submission permission is a known non-send: the draft remains unchanged and its reserved attempt resolves safely. Direct Airtable selection/window/day/timezone/interval changes stop further submission and require a fresh run. Automatic Sending and Last Trigger Key changes do not interrupt an existing run. Stop Run affects only the current run; disabling Automatic Sending prevents subsequent automatic starts.
 
 At Start, `runStartedAt` is captured once. Each query requests at most one Draft with Direction Outbound, Channel Email, nonblank Subject and Message, a Prospect relationship and `Created At <= runStartedAt`, sorted oldest first. Its linked Prospect is fetched to read Email. Candidates without Email are skipped one at a time; ambiguous multiple-Prospect links stop the run for correction. No queue is preloaded.
 
@@ -155,7 +179,7 @@ Prettier handles syntax formatting. ESLint enforces import grouping, type import
 The sequencer feature barrel exports `SequencerPanel`. App-level `OutreachDashboard` composes it with the public follow-up panel, preserving the existing layout. Component files use PascalCase.
 
 - `components/`: sequencer presentation for the header, run status, current interaction, last sent and notices. Cross-feature page composition stays in `src/app/components/`.
-- `hooks/`: dashboard data and polling/command coordination, interval and review controls, and the server-aligned clock.
+- `hooks/`: dashboard data and polling/command coordination, review controls, and the server-aligned clock. Interval configuration belongs to Schedules.
 - `api/client.ts`: browser requests to the existing sequencer routes through an injectable client interface.
 - `presenters/`: pure functions translating run phases into display content.
 - `utils/format.ts`: date and countdown formatting.

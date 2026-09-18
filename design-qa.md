@@ -1,4 +1,4 @@
-# Design QA — Email Sequencer multi-mailbox integration
+# Design QA — Email Sequencer mailboxes and schedules
 
 Status: passed
 
@@ -39,7 +39,20 @@ and custom fonts. No new visual direction, track or audit rules were introduced.
 ## Intentional scope differences
 
 The approved full design contains future surfaces that are not part of this slice:
-schedules, daily mailbox statistics and historical run storage. They remain absent
+daily mailbox statistics and historical run storage. They remain absent
 rather than represented by inactive or misleading UI. Credentials, pending attempts
 and the allocation cursor are durable; the last-confirmed UI summary remains
 process-session state. Legacy attribution is not invented or backfilled.
+
+## Schedule integration
+
+Schedules adds a third text-only tab, divider-separated schedule rows, a focused
+configuration form and explicit deletion confirmation. It reuses the existing ink,
+surface, border, spacing and 44px control tokens. Overview shows only established
+selected configuration and replaces the editable interval with schedule-owned
+timing. Loading, empty, invalid-selection, mutation failure and active-run locks
+remain explicit. UI-design Build guidance was applied to these new surfaces;
+navigation and section-layout guidance were also read. The browser suite exercises
+CRUD, defaults, selection, independent automatic controls and confirmed deletion,
+with captures at desktop and 390px mobile sizes. All providers remain mocked and
+server scheduling is explicitly disabled during isolated browser verification.

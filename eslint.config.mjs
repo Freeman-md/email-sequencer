@@ -76,6 +76,8 @@ export default defineConfig([
                   `@/features/${other}/**`,
                   `**/${other}`,
                   `**/${other}/**`,
+                  `!@/modules/outreach/${other}`,
+                  `!@/modules/outreach/${other}/**`,
                 ]),
               message:
                 'Compose features in the app layer; do not import another feature.',

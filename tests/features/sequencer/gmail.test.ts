@@ -34,6 +34,26 @@ const email = {
 const access = async () => 'fake-test-access';
 
 describe('Gmail outcome boundaries', () => {
+  it('checks submission permission after slow authorization and never requests Gmail when permission is denied', async () => {
+    const request = vi.fn<typeof fetch>();
+    let preparationFinished = false;
+    const send = createSender(async () => {
+      preparationFinished = true;
+
+      return 'synthetic-access';
+    }, request);
+    const beforeSubmit = vi.fn(async () => {
+      expect(preparationFinished).toBe(true);
+      throw new Error('Window closed before submission.');
+    });
+    expect(await send({ ...email, beforeSubmit })).toEqual({
+      kind: 'definite',
+      submissionPrevented: true,
+      message: 'Window closed before submission.',
+    });
+    expect(request).not.toHaveBeenCalled();
+    expect(beforeSubmit).toHaveBeenCalledTimes(1);
+  });
   it('encodes the message and accepts a confirmed message ID without retrying', async () => {
     const send = vi
       .fn<typeof fetch>()

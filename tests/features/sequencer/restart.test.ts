@@ -7,6 +7,7 @@ import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 import { SequencerRuntime } from '@/features/sequencer/server/runtime/sequencer-runtime';
 import { SequencerService } from '@/features/sequencer/server/services/sequencer.service';
 import { FileSendAttemptStore } from '@/infrastructure/send-attempts/store';
+import { NEW_SCHEDULE_DEFAULTS, WEEKDAYS } from '@/modules/outreach/schedules';
 
 import type { SendResult } from '@/infrastructure/email/types/send-result';
 
@@ -94,6 +95,23 @@ function setup(result: SendResult, persistenceFailure = false) {
     new SequencerRuntime(),
     mailboxes,
     attempts,
+    {
+      capture: vi.fn().mockResolvedValue({
+        ...NEW_SCHEDULE_DEFAULTS,
+        name: 'Synthetic',
+        days: [...WEEKDAYS],
+        opensAt: '00:00',
+        closesAt: '23:59',
+        id: 'recSchedule',
+        selected: true,
+        automaticSending: false,
+        lastTriggerKey: '',
+        intervalSeconds: 1,
+      }),
+      verify: vi.fn(),
+      status: vi.fn(),
+      claim: vi.fn(),
+    },
   );
   send.mockImplementation(async () => {
     runner.stop();
@@ -118,7 +136,7 @@ it.each(['unknown', 'completion-failure', 'resolution-failure'])(
         new Error('Synthetic journal failure'),
       );
     }
-    first.runner.start(1);
+    first.runner.start();
     await vi.waitFor(() => expect(first.runner.isActive()).toBe(false));
     const pending = (await first.attempts.read()).pending!;
     expect(pending.mailboxId).toBe('recMailboxA');
@@ -126,7 +144,7 @@ it.each(['unknown', 'completion-failure', 'resolution-failure'])(
       expect(pending.confirmation?.gmailMessageId).toBe('message-id');
     }
     const restarted = setup(confirmed);
-    restarted.runner.start(1);
+    restarted.runner.start();
     await vi.waitFor(() => expect(restarted.runner.isActive()).toBe(false));
     expect(restarted.send).not.toHaveBeenCalled();
     expect(restarted.interactions.findNextDraft).not.toHaveBeenCalled();
@@ -139,7 +157,7 @@ it.each(['unknown', 'completion-failure', 'resolution-failure'])(
 
 it('keeps short runs fair across a recreated runner and finishes a stopped send before clearing its reservation', async () => {
   const first = setup(confirmed);
-  first.runner.start(1);
+  first.runner.start();
   await vi.waitFor(() => expect(first.runner.isActive()).toBe(false));
   expect(first.interactions.confirmSent).toHaveBeenCalledWith(
     candidate.id,
@@ -147,7 +165,7 @@ it('keeps short runs fair across a recreated runner and finishes a stopped send 
   );
   expect((await first.attempts.read()).pending).toBeNull();
   const restarted = setup(confirmed);
-  restarted.runner.start(1);
+  restarted.runner.start();
   await vi.waitFor(() => expect(restarted.runner.isActive()).toBe(false));
   expect(restarted.send).toHaveBeenCalledWith(
     expect.objectContaining({ mailboxId: 'recMailboxB' }),

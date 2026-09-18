@@ -17,5 +17,10 @@ export interface IGmailClient {
   ): Promise<{ email: string; googleSubject: string }>;
   accessToken(refreshToken: string): Promise<string>;
   thread(id: string, token: string): Promise<GmailThread>;
-  send(raw: string, token: string, threadId?: string): Promise<SendResult>;
+  send(
+    raw: string,
+    token: string,
+    threadId?: string,
+    beforeSubmit?: () => Promise<void>,
+  ): Promise<SendResult>;
 }

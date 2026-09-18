@@ -67,7 +67,7 @@ export function useSequencer(
   }, [client]);
 
   const command = useCallback(
-    async (action: 'start' | 'stop', intervalSeconds?: number) => {
+    async (action: 'start' | 'stop') => {
       const controller = lifecycle.current;
       if (!controller || controller.signal.aborted || pendingCommand.current)
         return;
@@ -77,13 +77,9 @@ export function useSequencer(
       setBusy(true);
 
       try {
-        if (action === 'start' && intervalSeconds === undefined) {
-          throw new Error('Provide Interval Seconds before starting.');
-        }
-
         const result =
           action === 'start'
-            ? await client.start(intervalSeconds!, controller.signal)
+            ? await client.start(controller.signal)
             : await client.stop(controller.signal);
 
         if (!controller.signal.aborted) {

@@ -4,6 +4,6 @@ export interface ISequencerService {
   snapshot(): RunState;
   isActive(): boolean;
   getDashboardState(): Promise<DashboardState>;
-  start(intervalSeconds: number): RunState;
+  start(): RunState;
   stop(): RunState;
 }

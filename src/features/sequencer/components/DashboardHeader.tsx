@@ -6,8 +6,8 @@ export function DashboardHeader({
   onViewChange,
 }: {
   data: DashboardState | null;
-  activeView: 'overview' | 'mailboxes';
-  onViewChange: (view: 'overview' | 'mailboxes') => void;
+  activeView: 'overview' | 'mailboxes' | 'schedules';
+  onViewChange: (view: 'overview' | 'mailboxes' | 'schedules') => void;
 }) {
   const airtableConnected = Boolean(data?.airtable.connected);
 
@@ -40,6 +40,14 @@ export function DashboardHeader({
           onClick={() => onViewChange('mailboxes')}
         >
           Mailboxes
+        </button>
+        <button
+          className={activeView === 'schedules' ? 'selected' : ''}
+          type="button"
+          aria-current={activeView === 'schedules' ? 'page' : undefined}
+          onClick={() => onViewChange('schedules')}
+        >
+          Schedules
         </button>
       </nav>
     </header>

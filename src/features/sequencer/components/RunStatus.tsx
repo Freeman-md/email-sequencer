@@ -1,5 +1,3 @@
-import { MAX_INTERVAL_SECONDS } from '../constants/run';
-
 import type { useDashboardControls } from '../hooks/use-dashboard-controls';
 import type { RunStatusPresentation } from '../presenters/run-status';
 import type { RunState } from '../types';
@@ -53,21 +51,6 @@ export function RunStatus({
         </label>
       )}
       <div className="run-action-row">
-        <label htmlFor="interval" className="interval-field">
-          <span>Interval Seconds</span>
-          <input
-            id="interval"
-            aria-label="INTERVAL SECONDS"
-            type="number"
-            min="1"
-            max={MAX_INTERVAL_SECONDS}
-            step="1"
-            value={controls.interval}
-            onChange={(event) => controls.setInterval(event.target.value)}
-            disabled={controls.intervalDisabled}
-            aria-invalid={!controls.valid}
-          />
-        </label>
         {controls.action === 'connect' ? (
           <a className="primary" href="/api/gmail/connect">
             Connect Gmail
@@ -90,7 +73,7 @@ export function RunStatus({
       </div>
       {!controls.valid && (
         <p className="danger-text input-error" role="alert">
-          Enter a whole number from 1 to {MAX_INTERVAL_SECONDS} seconds.
+          Select a valid schedule and start within its sending window.
         </p>
       )}
     </section>

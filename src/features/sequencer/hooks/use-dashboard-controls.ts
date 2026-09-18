@@ -2,11 +2,6 @@
 
 import { useState } from 'react';
 
-import {
-  DEFAULT_INTERVAL_SECONDS,
-  MAX_INTERVAL_SECONDS,
-} from '../constants/run';
-
 import type { DashboardState, RunState } from '../types';
 
 export function useDashboardControls({
@@ -20,23 +15,18 @@ export function useDashboardControls({
   run: RunState;
   busy: boolean;
   error: string | null;
-  command: (
-    action: 'start' | 'stop',
-    intervalSeconds?: number,
-  ) => Promise<void>;
+  command: (action: 'start' | 'stop') => Promise<void>;
 }) {
-  const [interval, setInterval] = useState(
-    String(run.intervalSeconds ?? DEFAULT_INTERVAL_SECONDS),
-  );
   const [reviewedKey, setReviewedKey] = useState<string | null>(null);
   const active = run.status === 'running';
   const stopping = run.phase === 'stopping';
   const ready = Boolean(data?.airtable.connected && data?.gmail.connected);
-  const seconds = active ? run.intervalSeconds : Number(interval);
-  const valid =
-    Number.isInteger(seconds) &&
-    seconds >= 1 &&
-    seconds <= MAX_INTERVAL_SECONDS;
+  const seconds = active
+    ? run.intervalSeconds
+    : (data?.schedule.selected?.intervalSeconds ?? 1200);
+  const valid = Boolean(
+    data?.schedule.selected && data.schedule.windowOpen && !data.schedule.error,
+  );
   const reviewErrors = run.errors.filter(
     (entry) => entry.kind === 'uncertain' || entry.kind === 'reconciliation',
   );
@@ -58,7 +48,7 @@ export function useDashboardControls({
     if (!canStart) return;
 
     setReviewedKey(null);
-    void command('start', seconds);
+    void command('start');
   }
 
   function stop() {
@@ -73,9 +63,6 @@ export function useDashboardControls({
     valid,
     reviewed,
     needsReview: reviewKey !== null,
-    interval: active ? String(run.intervalSeconds) : interval,
-    intervalDisabled: active || busy,
-    setInterval,
     setReviewed: (checked: boolean) =>
       setReviewedKey(checked ? reviewKey : null),
     canStart,

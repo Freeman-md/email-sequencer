@@ -782,3 +782,76 @@ h1 {
     border-left: 0;
   }
 }
+/* Schedule controls use the existing product tokens and control sizing. */
+.schedule-summary {
+  margin-block: 24px;
+}
+.schedule-row {
+  display: flex;
+  justify-content: space-between;
+  gap: 24px;
+  padding-block: 24px;
+  border-top: 1px solid var(--color-border);
+}
+.schedule-row > div {
+  min-width: 0;
+}
+.schedule-row p {
+  overflow-wrap: anywhere;
+}
+.schedule-form {
+  max-width: 720px;
+  margin-block: 24px;
+}
+.schedule-form label {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.schedule-fields {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 16px;
+  margin-block: 16px;
+}
+.schedule-form input:not([type='checkbox']) {
+  width: 100%;
+  min-height: 44px;
+  border: 1px solid var(--color-control-border);
+  border-radius: 8px;
+  padding: 8px 12px;
+  color: var(--color-ink);
+  background: var(--color-surface);
+  font: inherit;
+}
+.schedule-form fieldset {
+  border: 0;
+  padding: 0;
+  margin-block: 16px;
+}
+.schedule-days {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px 16px;
+}
+.schedule-days label {
+  flex-direction: row;
+  align-items: center;
+  min-height: 44px;
+}
+.schedule-row .mailbox-actions {
+  flex-wrap: wrap;
+  align-content: start;
+}
+@media (max-width: 640px) {
+  .schedule-row {
+    flex-direction: column;
+    gap: 16px;
+  }
+  .schedule-fields {
+    grid-template-columns: 1fr;
+  }
+  .schedule-form input {
+    font-size: 16px;
+  }
+}

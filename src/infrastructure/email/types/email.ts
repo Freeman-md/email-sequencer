@@ -1,4 +1,5 @@
 export type Email = {
+  beforeSubmit?: () => Promise<void>;
   mailboxId?: string;
   email: string;
   subject: string;

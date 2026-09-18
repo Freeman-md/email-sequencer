@@ -4,6 +4,14 @@ import { initialRunState } from '../../src/features/sequencer/constants/run';
 import type { DashboardState } from '../../src/features/sequencer/types';
 
 test.beforeEach(async ({ page }) => {
+  await page.route('**/api/schedules', (route) =>
+    route.fulfill({
+      json: {
+        schedules: [fixture().schedule.selected],
+        status: fixture().schedule,
+      },
+    }),
+  );
   await page.route('**/api/mailboxes', (route) =>
     route.fulfill({ json: { mailboxes: fixture().mailboxes } }),
   );
@@ -47,6 +55,24 @@ function fixture(): DashboardState {
       },
     ],
     pendingAttempt: null,
+    schedule: {
+      selected: {
+        id: 'recSchedule',
+        name: 'Weekday outreach',
+        days: ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday'],
+        opensAt: '09:00',
+        closesAt: '17:00',
+        timezone: 'Europe/London',
+        intervalSeconds: 1200,
+        selected: true,
+        automaticSending: false,
+        lastTriggerKey: '',
+      },
+      windowOpen: true,
+      nextTriggerAt: null,
+      error: null,
+      schedulerError: null,
+    },
     serverNow: '2026-09-09T12:10:42.000Z',
     run: { ...initialRunState(), lastSent },
   };
@@ -55,6 +81,133 @@ function fixture(): DashboardState {
 async function openFollowUpPreparation(page: Page) {
   await page.getByText('Prepare follow-up drafts', { exact: true }).click();
 }
+
+test('schedule CRUD uses safe defaults, independent automation and confirmed deletion on desktop and mobile', async ({
+  page,
+}) => {
+  const state = fixture();
+  let schedules = [state.schedule.selected!];
+  await page.route('**/api/sequencer/**', (route) =>
+    route.fulfill({ json: state }),
+  );
+  await page.route('**/api/schedules', async (route) => {
+    const request = route.request();
+    if (request.method() === 'POST') {
+      const configuration = request.postDataJSON();
+      expect(configuration.intervalSeconds).toBe(1200);
+      schedules.push({
+        ...configuration,
+        id: 'recNewSchedule',
+        selected: false,
+        automaticSending: false,
+        lastTriggerKey: '',
+      });
+    } else if (request.method() === 'PATCH') {
+      const body = request.postDataJSON();
+      if (body.action === 'select')
+        schedules = schedules.map((schedule) => ({
+          ...schedule,
+          selected: schedule.id === body.id,
+        }));
+      else if (body.action === 'automatic')
+        schedules = schedules.map((schedule) =>
+          schedule.id === body.id
+            ? { ...schedule, automaticSending: body.enabled }
+            : schedule,
+        );
+      else if (body.action === 'edit')
+        schedules = schedules.map((schedule) =>
+          schedule.id === body.id
+            ? { ...schedule, ...body.configuration }
+            : schedule,
+        );
+    } else if (request.method() === 'DELETE') {
+      expect(request.postDataJSON().confirmed).toBe(true);
+      schedules = schedules.filter(
+        (schedule) => schedule.id !== request.postDataJSON().id,
+      );
+    }
+    state.schedule.selected =
+      schedules.find((schedule) => schedule.selected) ?? null;
+    state.schedule.error = state.schedule.selected
+      ? null
+      : 'No schedule is selected.';
+    state.schedule.windowOpen = Boolean(state.schedule.selected);
+    await route.fulfill({ json: { schedules, status: state.schedule } });
+  });
+  await page.goto('/');
+  await page.getByRole('button', { name: 'Schedules', exact: true }).click();
+  await page.getByRole('button', { name: 'New Schedule' }).click();
+  await expect(
+    page.getByLabel('Interval seconds', { exact: true }),
+  ).toHaveValue('1200');
+  await expect(page.getByLabel('Opens at', { exact: true })).toHaveValue(
+    '09:00',
+  );
+  await expect(page.getByLabel('Closes at', { exact: true })).toHaveValue(
+    '17:00',
+  );
+  await expect(page.getByLabel('Timezone', { exact: true })).toHaveValue(
+    'Europe/London',
+  );
+  await page.getByLabel('Name', { exact: true }).fill('Morning outreach');
+  await page.getByRole('button', { name: 'Save schedule' }).click();
+  const row = page
+    .locator('.schedule-row')
+    .filter({ hasText: 'Morning outreach' });
+  await expect(row).toContainText('Unselected · Automatic sending off');
+  await row.getByRole('button', { name: 'Select', exact: true }).click();
+  await expect(row).toContainText('Selected · Automatic sending off');
+  await row.getByRole('button', { name: 'Edit', exact: true }).click();
+  await page.getByLabel('Interval seconds', { exact: true }).fill('600');
+  await page.getByRole('button', { name: 'Save schedule' }).click();
+  await expect(row).toContainText('Interval: 600 seconds');
+  await row
+    .getByRole('button', { name: 'Enable automatic', exact: true })
+    .click();
+  await expect(row).toContainText('Automatic sending on');
+  await row
+    .getByRole('button', { name: 'Disable automatic', exact: true })
+    .click();
+  await expect(row).toContainText('Selected · Automatic sending off');
+  await expect(
+    page.getByRole('button', { name: 'New Schedule' }),
+  ).toBeEnabled();
+  await page.screenshot({
+    path: 'output/playwright/schedules-desktop.png',
+    fullPage: true,
+  });
+  await page.setViewportSize({ width: 390, height: 1000 });
+  await page.screenshot({
+    path: 'output/playwright/schedules-mobile.png',
+    fullPage: true,
+  });
+  expect(
+    await page.evaluate(
+      () => document.documentElement.scrollWidth <= innerWidth,
+    ),
+  ).toBe(true);
+  for (const control of await page.locator('.schedules button').all()) {
+    const bounds = await control.boundingBox();
+    expect(bounds?.height).toBeGreaterThanOrEqual(44);
+    expect(bounds?.width).toBeGreaterThanOrEqual(44);
+  }
+  await row.getByRole('button', { name: 'Delete', exact: true }).click();
+  expect(schedules.some((schedule) => schedule.id === 'recNewSchedule')).toBe(
+    true,
+  );
+  await expect(
+    page.getByText(
+      'Deleting this schedule leaves no selection and blocks sending.',
+    ),
+  ).toBeVisible();
+  await page
+    .getByRole('button', { name: 'Confirm Delete', exact: true })
+    .click();
+  await expect(row).toHaveCount(0);
+  await page.getByRole('button', { name: 'Overview', exact: true }).click();
+  await expect(page.getByRole('button', { name: 'Start Run' })).toBeDisabled();
+});
 
 test('desktop states, controls and mobile preserve operational fields without overflow', async ({
   page,
@@ -65,7 +218,7 @@ test('desktop states, controls and mobile preserve operational fields without ov
   await page.route('**/api/sequencer/**', async (route) => {
     if (route.request().method() !== 'GET') {
       expect(route.request().url()).toContain('/start');
-      expect(route.request().postDataJSON()).toEqual({ intervalSeconds: 300 });
+      expect(route.request().postDataJSON()).toEqual({});
       state.run = {
         ...state.run,
         status: 'running',
@@ -85,16 +238,13 @@ test('desktop states, controls and mobile preserve operational fields without ov
     path: 'output/playwright/ready.png',
     fullPage: true,
   });
-  await page.getByLabel('INTERVAL SECONDS', { exact: true }).fill('0');
-  await expect(page.getByRole('button', { name: 'Start Run' })).toBeDisabled();
-  await page.getByLabel('INTERVAL SECONDS', { exact: true }).fill('300');
+  await expect(
+    page.getByLabel('INTERVAL SECONDS', { exact: true }),
+  ).toHaveCount(0);
   await page.getByRole('button', { name: 'Start Run' }).click();
   await expect(
     page.getByRole('heading', { name: 'Sending email' }),
   ).toBeVisible();
-  await expect(
-    page.getByLabel('INTERVAL SECONDS', { exact: true }),
-  ).toBeDisabled();
   await page.screenshot({
     path: 'output/playwright/sending.png',
     fullPage: true,
@@ -276,7 +426,9 @@ test('manages independent mailboxes, restores reconnect identity and retains sen
     fullPage: true,
   });
   for (const control of await page
-    .locator('.mailbox-actions a, .mailbox-actions button')
+    .locator(
+      '.mailbox-management .mailbox-actions a, .mailbox-management .mailbox-actions button',
+    )
     .all()) {
     const bounds = await control.boundingBox();
     expect(bounds?.height).toBeGreaterThanOrEqual(44);

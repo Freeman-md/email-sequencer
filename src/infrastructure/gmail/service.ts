@@ -68,7 +68,12 @@ export class GmailService implements EmailSender {
       };
     }
 
-    return this.client.send(raw, token, email.gmailThreadId);
+    return this.client.send(
+      raw,
+      token,
+      email.gmailThreadId,
+      email.beforeSubmit,
+    );
   }
 
   private async replyHeaders(email: Email, token: string, mailbox: string) {
