@@ -2,9 +2,9 @@ import { z } from 'zod';
 
 import { textField, linksField } from '@/infrastructure/airtable/record-fields';
 
-import { PROSPECT_FIELDS as field } from '../fields';
+import { PROSPECT_FIELDS as field } from './fields';
 
-import type { ProspectContact, ProspectContext } from '../../types';
+import type { ProspectContact, ProspectContext } from '../types';
 import type { AirtableRecord } from '@/infrastructure/airtable/schemas';
 
 export function mapProspectContact(record: AirtableRecord): ProspectContact {

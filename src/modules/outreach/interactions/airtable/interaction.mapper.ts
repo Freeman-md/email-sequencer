@@ -1,12 +1,12 @@
 import { textField, linksField } from '@/infrastructure/airtable/record-fields';
 
-import { INTERACTION_FIELDS as field, RECEIVED_AT_FIELD } from '../fields';
+import { INTERACTION_FIELDS as field, RECEIVED_AT_FIELD } from './fields';
 
 import type {
   DraftCandidate,
   HistoryInteraction,
   FollowUpDraft,
-} from '../../types';
+} from '../types';
 import type { AirtableRecord } from '@/infrastructure/airtable/schemas';
 
 export function mapDraftCandidate(record: AirtableRecord): DraftCandidate {

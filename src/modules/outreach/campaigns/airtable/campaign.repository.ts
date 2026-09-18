@@ -1,8 +1,8 @@
 import 'server-only';
 import { recordSchema } from '@/infrastructure/airtable/schemas';
 
+import { mapCampaign } from './campaign.mapper';
 import { CAMPAIGN_TABLE } from './fields';
-import { mapCampaign } from './mappers/campaign.mapper';
 
 import type { ICampaignRepository } from '../interfaces/campaign-repository.interface';
 import type { IAirtableClient } from '@/infrastructure/airtable/interfaces/client.interface';

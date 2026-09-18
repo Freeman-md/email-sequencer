@@ -2,9 +2,9 @@ import { z } from 'zod';
 
 import { textField } from '@/infrastructure/airtable/record-fields';
 
-import { CAMPAIGN_FIELDS as field } from '../fields';
+import { CAMPAIGN_FIELDS as field } from './fields';
 
-import type { Campaign } from '../../types';
+import type { Campaign } from '../types';
 import type { AirtableRecord } from '@/infrastructure/airtable/schemas';
 
 export function mapCampaign(record: AirtableRecord): Campaign {

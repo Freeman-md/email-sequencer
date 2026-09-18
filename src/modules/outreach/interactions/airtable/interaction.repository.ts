@@ -12,7 +12,7 @@ import {
   mapInteractionHistory,
   draftFields,
   mapInteractionCompletion,
-} from './mappers/interaction.mapper';
+} from './interaction.mapper';
 
 import type { IInteractionRepository } from '../interfaces/interaction-repository.interface';
 import type {
