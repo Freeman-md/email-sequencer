@@ -10,4 +10,7 @@ try {
 if (process.env.GMAIL_TOKEN_FILE) {
   process.env.GMAIL_TOKEN_FILE = resolve(process.env.GMAIL_TOKEN_FILE);
 }
+if (process.env.SEND_ATTEMPT_FILE) {
+  process.env.SEND_ATTEMPT_FILE = resolve(process.env.SEND_ATTEMPT_FILE);
+}
 await import('../.next/standalone/server.js');

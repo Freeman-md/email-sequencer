@@ -70,6 +70,12 @@ export function presentCurrentInteraction(
       details: [
         ['PROSPECT', current?.company || '—'],
         ['CREATED AT', dateTime(current?.createdAt ?? null)],
+        [
+          'SENDER',
+          current?.mailboxEmail
+            ? `${current.mailboxEmail} (${current.mailboxId})`
+            : 'Not selected',
+        ],
       ],
     };
   }
@@ -84,7 +90,7 @@ export function presentCurrentInteraction(
       label: 'CONNECTION',
       value: connected ? 'See connection status above' : 'Gmail OAuth',
       details: [
-        ['REUSES', 'One Gmail account'],
+        ['DISTRIBUTION', 'Available Gmail accounts'],
         ['AIRTABLE', 'See connection status above'],
       ],
     };

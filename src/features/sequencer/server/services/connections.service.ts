@@ -3,8 +3,7 @@ import 'server-only';
 import type { Connection } from '../../types';
 import type { ConnectionState } from '../../types';
 import type { IConnectionsService } from '../interfaces/connections-service.interface';
-import type { GmailConnection } from '../interfaces/gmail-connection.interface';
-import type { SequencerRuntime } from '../runtime/sequencer-runtime';
+import type { ISenderMailboxes } from '../interfaces/mailboxes.interface';
 import type { IDraftQueueRepository } from '@/modules/outreach/interactions';
 import type { IProspectContactRepository } from '@/modules/outreach/prospects';
 
@@ -14,8 +13,7 @@ export class ConnectionsService implements IConnectionsService {
   constructor(
     private readonly interactions: IDraftQueueRepository,
     private readonly prospects: IProspectContactRepository,
-    private readonly gmail: GmailConnection,
-    private readonly runtime: SequencerRuntime,
+    private readonly mailboxes: ISenderMailboxes,
     private readonly now: () => number = Date.now,
   ) {}
 
@@ -27,23 +25,16 @@ export class ConnectionsService implements IConnectionsService {
     return this.cache.value;
   }
 
+  invalidate() {
+    this.cache = undefined;
+  }
+
   async requireReady() {
     const connections = await this.refresh();
 
     if (!connections.airtable.connected)
       throw new Error(connections.airtable.detail);
     if (!connections.gmail.connected) throw new Error(connections.gmail.detail);
-  }
-
-  async connectGmail(state: string, cookie: string | undefined, code: string) {
-    this.runtime.beginConnectionChange();
-
-    try {
-      await this.gmail.completeAuthorization(state, cookie, code);
-      this.cache = undefined;
-    } finally {
-      this.runtime.endConnectionChange();
-    }
   }
 
   private refresh(): Promise<ConnectionState> {
@@ -54,17 +45,24 @@ export class ConnectionsService implements IConnectionsService {
   }
 
   private async check(): Promise<ConnectionState> {
-    const [airtable, gmail] = await Promise.all([
+    const [airtable, state] = await Promise.all([
       this.inspect(async () => {
         await this.interactions.checkConnection();
         await this.prospects.checkConnection();
 
         return { connected: true, detail: 'Connected' };
       }),
-      this.inspect(() => this.gmail.checkConnection()),
+      this.mailboxes.getState(),
     ]);
+    const available = state.mailboxes.filter((mailbox) => mailbox.connected);
+    const gmail = {
+      connected: available.length > 0,
+      detail: available.length
+        ? `${available.length} available mailbox${available.length === 1 ? '' : 'es'}`
+        : 'No mailbox available. Add or reconnect Gmail in Mailboxes.',
+    };
 
-    return { airtable, gmail };
+    return { airtable, gmail, ...state };
   }
 
   private async inspect(check: () => Promise<Connection>): Promise<Connection> {

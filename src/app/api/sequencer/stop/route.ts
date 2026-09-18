@@ -1,4 +1,4 @@
-import { getSequencerServices } from '@/features/sequencer/server';
+import { getSequencerServices } from '@/app/server/composition';
 import { apiError } from '@/infrastructure/http/api-error';
 import { requireSameOrigin } from '@/infrastructure/http/require-same-origin';
 

@@ -21,7 +21,6 @@ function createSender(
       refreshToken: 'fake-refresh',
       email: 'operator@example.com',
     }),
-    write: vi.fn(),
   });
 
   return service.send.bind(service);
@@ -55,6 +54,7 @@ describe('Gmail outcome boundaries', () => {
     const raw = JSON.parse(send.mock.calls[0]?.[1]?.body as string).raw;
     const mime = Buffer.from(raw, 'base64url').toString('utf8');
     expect(mime).toContain('To: maya@example.com');
+    expect(mime).toContain('From: operator@example.com');
     expect(mime).toContain('Subject: =?UTF-8?');
     expect(send).toHaveBeenCalledTimes(1);
   });
@@ -180,6 +180,40 @@ function threadFixture() {
 }
 
 describe('threaded Gmail sending', () => {
+  it('requires the original message in the thread and rejects any earlier reply, even after later outbound mail', async () => {
+    const request = vi
+      .fn<typeof fetch>()
+      .mockResolvedValueOnce(Response.json(threadFixture()));
+    const missing = await createSender(
+      access,
+      request,
+    )({
+      ...email,
+      isFollowUp: true,
+      gmailThreadId: 'thread-id',
+      gmailOriginalMessageId: 'absent-message',
+    });
+    expect(missing.kind).toBe('definite');
+    expect(request).toHaveBeenCalledTimes(1);
+    const thread = threadFixture();
+    const reply = structuredClone(thread.messages[0]!);
+    reply.id = 'received-reply';
+    reply.internalDate = '1788254300000';
+    reply.payload.headers[0]!.value = 'maya@example.com';
+    thread.messages.push(reply);
+    request.mockResolvedValueOnce(Response.json(thread));
+    const replied = await createSender(
+      access,
+      request,
+    )({
+      ...email,
+      isFollowUp: true,
+      gmailThreadId: 'thread-id',
+      gmailOriginalMessageId: 'parent-gmail-id',
+    });
+    expect(replied.kind).toBe('definite');
+    expect(request).toHaveBeenCalledTimes(2);
+  });
   it('uses RFC reply headers and the Gmail thread ID, including encoded subjects', async () => {
     const request = vi
       .fn<typeof fetch>()

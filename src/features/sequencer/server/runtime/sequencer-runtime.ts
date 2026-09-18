@@ -4,6 +4,8 @@ import { initialRunState, MAX_INTERVAL_SECONDS } from '../../constants/run';
 
 import type { InteractionSummary, RunError, RunState } from '../../types';
 
+export class ConnectionChangeBlockedError extends Error {}
+
 export class SequencerRuntime {
   private state = initialRunState();
   private active = false;
@@ -80,7 +82,9 @@ export class SequencerRuntime {
 
   beginConnectionChange() {
     if (this.active || this.connectionChanging) {
-      throw new Error('Stop the run before changing Gmail.');
+      throw new ConnectionChangeBlockedError(
+        'Stop the run before changing Gmail.',
+      );
     }
 
     this.connectionChanging = true;

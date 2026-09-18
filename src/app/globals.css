@@ -350,6 +350,71 @@ h1 {
   background: var(--color-ink);
 }
 
+.secondary {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 44px;
+  min-height: 44px;
+  padding: 10px 12px;
+  color: var(--color-ink);
+  font-size: 14px;
+  font-weight: 500;
+  line-height: 20px;
+  text-decoration: none;
+  cursor: pointer;
+  background: var(--color-surface);
+  border: 1px solid var(--color-control-border);
+  border-radius: 8px;
+}
+
+@media (hover: hover) {
+  .secondary:hover:not(:disabled) {
+    background: var(--color-canvas);
+  }
+}
+
+.secondary:active:not(:disabled) {
+  background: var(--color-border);
+}
+
+.secondary:disabled {
+  cursor: not-allowed;
+  opacity: 0.5;
+}
+
+.send-reconciliation {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 12px;
+}
+
+.reconciliation-outcome {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  width: 100%;
+  max-width: 560px;
+}
+
+.reconciliation-outcome select {
+  min-width: 0;
+  min-height: 44px;
+  width: 100%;
+  padding: 10px 12px;
+  color: var(--color-ink);
+  background: var(--color-surface);
+  border: 1px solid var(--color-control-border);
+  border-radius: 8px;
+  font: inherit;
+}
+
+.reconciliation-outcome select:focus-visible {
+  outline: 3px solid var(--color-ink);
+  outline-offset: 0;
+}
+
 .reconciliation-check {
   display: flex;
   align-items: flex-start;
@@ -562,6 +627,14 @@ h1 {
   border-left: 1px solid var(--color-border);
 }
 
+.mailbox-actions {
+  display: flex;
+  align-items: flex-start;
+  align-content: flex-start;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
 .connection-status > p:last-child {
   margin-top: 4px;
   color: var(--color-ink);
@@ -600,6 +673,12 @@ h1 {
 }
 
 @media (max-width: 639px) {
+  .secondary,
+  .reconciliation-outcome select {
+    font-size: 16px;
+    line-height: 24px;
+  }
+
   .dashboard {
     gap: 20px;
     padding: 8px 20px 32px;

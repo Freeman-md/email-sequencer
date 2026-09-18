@@ -1,6 +1,9 @@
 import type { StoredToken } from '../schemas';
 
-export interface TokenStore {
+export interface TokenReader {
   read(): Promise<StoredToken | null>;
+}
+
+export interface TokenStore extends TokenReader {
   write(token: StoredToken): Promise<void>;
 }

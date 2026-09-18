@@ -11,7 +11,10 @@ export interface IGmailClient {
   exchange(
     code: string,
     verifier: string,
-  ): Promise<{ email: string; refreshToken?: string }>;
+  ): Promise<{ email: string; googleSubject: string; refreshToken?: string }>;
+  verifiedRefreshIdentity(
+    refreshToken: string,
+  ): Promise<{ email: string; googleSubject: string }>;
   accessToken(refreshToken: string): Promise<string>;
   thread(id: string, token: string): Promise<GmailThread>;
   send(raw: string, token: string, threadId?: string): Promise<SendResult>;

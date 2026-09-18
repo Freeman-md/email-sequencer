@@ -45,7 +45,13 @@ export function useDashboardControls({
     : null;
   const reviewed = reviewKey !== null && reviewedKey === reviewKey;
   const canStart =
-    !active && ready && valid && !busy && !error && (!reviewKey || reviewed);
+    !active &&
+    ready &&
+    valid &&
+    !busy &&
+    !error &&
+    !data?.pendingAttempt &&
+    (!reviewKey || reviewed);
   const canStop = active && !busy && !stopping;
 
   function start() {

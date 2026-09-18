@@ -36,11 +36,14 @@ const initial: HistoryInteraction = {
   gmailMessageId: 'message1',
   gmailThreadId: 'thread1',
   prospectIds: [prospect.id],
+  mailboxIds: ['recMailboxA'],
+  initialInteractionIds: [],
 };
 const followup: HistoryInteraction = {
   ...initial,
   id: 'recFollowup',
   type: 'Follow-up',
+  initialInteractionIds: [initial.id],
   sentAt: '2026-09-04T12:00:00Z',
   gmailMessageId: 'message2',
 };
@@ -232,6 +235,7 @@ describe('preparation workflow', () => {
       subject: initial.subject,
       message: 'A short, relevant follow-up.',
       gmailThreadId: initial.gmailThreadId,
+      initialInteractionId: initial.id,
     });
     expect(prospects.findContextById).toHaveBeenCalledTimes(2);
     expect(generator.generate).toHaveBeenCalledWith(

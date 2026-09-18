@@ -1,6 +1,6 @@
 # Email Sequencer — V1
 
-A single-operator Next.js dashboard that sends eligible Airtable Interactions through one Gmail mailbox. Airtable is the operational source of truth; the runner lives in one long-lived Node process. No database or worker service.
+A single-operator Next.js dashboard that sends eligible Airtable Interactions through multiple Gmail mailboxes. Airtable is the operational source of truth; the runner lives in one long-lived Node process. No additional database, worker or scheduler.
 
 ## Local setup
 
@@ -21,10 +21,11 @@ Create a [personal access token](https://airtable.com/create/tokens) with `data.
 
 Use the existing tables, adding the Gmail ID and received-time fields below:
 
-- Interactions (`tblqbyXiQs2ZAHTrH`): `Status`, `Direction`, `Channel`, `Subject`, `Message`, `Prospect`, `Created At`, `Sent At`, `Type`, `Gmail Message ID`, `Gmail Thread ID`, `Received At`.
+- Interactions (`tblqbyXiQs2ZAHTrH`): `Status`, `Direction`, `Channel`, `Subject`, `Message`, `Prospect`, `Created At`, `Sent At`, `Type`, `Gmail Message ID`, `Gmail Thread ID`, `Received At`, `Sent From Mailbox`, `Initial Interaction`.
+- Mailboxes (`tblkD6BwWaJPWLdr5`): `Email`, `Google Subject`, reciprocal `Sent Interactions`. `Sent From Mailbox` links here; `Initial Interaction` links to Interactions with reciprocal `Follow-up Interactions`. These fields already exist; do not recreate them. The app validates single-record ownership despite Airtable's multiple-record link type.
 - Prospects (`tblVwsTybmO6xNsmY`): `Full Name`, `Company`, `Email`, `Do Not Contact` (checkbox).
 
-Table IDs and field mappings are owned by each entity’s `airtable/fields.ts` under `src/modules/outreach`. No schema-write scope is needed. Connection checks read zero records and validate access to both tables. Write access is verified when an actual confirmed send is saved, not by modifying real data during connection checks.
+Table IDs and field mappings are owned by each entity’s `airtable/fields.ts` under `src/modules/outreach`. No schema-write scope is needed. Interaction/Prospect checks read zero records; mailbox checks list metadata and verify private credentials and provider permissions. Write access is verified by real workflow writes, not by modifying data during connection checks.
 
 ### Google OAuth
 
@@ -33,7 +34,15 @@ Table IDs and field mappings are owned by each entity’s `airtable/fields.ts` u
 3. Create an OAuth client with application type **Web application**. Add the exact authorized redirect URI `http://localhost:3000/api/gmail/callback`. No JavaScript origin is required for this server-side flow.
 4. Put the client ID and secret in `EMAIL_SEQUENCER_GOOGLE_CLIENT_ID` and `EMAIL_SEQUENCER_GOOGLE_CLIENT_SECRET`. Set `EMAIL_SEQUENCER_GOOGLE_REDIRECT_URI` to that same exact URI.
 5. Click **Connect Gmail** in the dashboard and grant access. The app requests `gmail.send` and `gmail.metadata`, plus `openid` and `email` to identify the connected mailbox. Metadata permission retrieves thread headers for replies; it does not read message bodies. Reconnect existing Gmail authorizations after this update.
-6. `GMAIL_TOKEN_FILE` controls where the refresh token is stored: `.data/gmail-token.json` locally. The file is atomically written with mode `600`, outside the public directory. The browser never receives tokens. Keep the parent directory private; never commit or serve this file.
+6. `GMAIL_TOKEN_FILE` retains the legacy single-account file path: `.data/gmail-token.json` locally. Version-2 per-mailbox credentials are stored alongside it at `<GMAIL_TOKEN_FILE>.v2`, keyed by Airtable mailbox record ID. Mutations are serialized and writes are private, atomic and synced. The browser and Airtable never receive tokens. Keep the parent directory private; never commit or serve these files.
+
+### Mailboxes and migration
+
+Open **Mailboxes** to Add, Reconnect or Disconnect accounts. Authorization offers account selection; verified Google subject determines identity. Reconnecting reuses the same Airtable record, and a reconnect link rejects a different account. Disconnect deletes only that mailbox's local credentials, not its Airtable metadata or history, and does **not** revoke Google consent. Metadata alone does not make an account available: credentials and a successful provider check are required. Checks use at most four concurrent accounts and overlapping checks share work. Connection changes, including callbacks, are blocked throughout an active sending run.
+
+On the first dashboard/mailbox read after upgrade, application code attempts a non-destructive migration. It verifies a refreshed Google ID token and required scopes before reusing/creating metadata. If stable identity cannot be verified, the UI requires reconnect rather than guessing. The original file is never overwritten or deleted and cannot resurrect a disconnected account after migration. Already connected version-2 credentials take precedence. Stop all active work and restart the Node process once after upgrading so cached service instances use the new composition.
+
+Migration does not assign historical senders. Legacy interactions without reliable `Sent From Mailbox` and original-conversation links remain blocked for explicit operator reconciliation. Do not populate history speculatively.
 
 Google External apps in Testing normally receive refresh tokens that expire after seven days when using Gmail scopes. For ongoing use, move the consent configuration to Production and satisfy any Google verification requirements that apply to your audience. See [Google's OAuth web server guide](https://developers.google.com/identity/protocols/oauth2/web-server) and [Gmail scopes](https://developers.google.com/workspace/gmail/api/auth/scopes). Reconnect through the dashboard when authorization is revoked or expires.
 
@@ -41,17 +50,18 @@ Google External apps in Testing normally receive refresh tokens that expire afte
 
 Every required variable is in `.env.example`:
 
-| Variable                               | Value                                                  |
-| -------------------------------------- | ------------------------------------------------------ |
-| `AIRTABLE_API_TOKEN`                   | Personal access token with record read/write access    |
-| `AIRTABLE_BASE_ID`                     | `apphI2f8iKVYaDRbg`                                    |
-| `EMAIL_SEQUENCER_GOOGLE_CLIENT_ID`     | Web OAuth client ID                                    |
-| `EMAIL_SEQUENCER_GOOGLE_CLIENT_SECRET` | Web OAuth client secret                                |
-| `EMAIL_SEQUENCER_GOOGLE_REDIRECT_URI`  | Exact callback URL, HTTPS in production                |
-| `GMAIL_TOKEN_FILE`                     | Private writable file path on persistent storage       |
-| `EMAIL_SEQUENCER_OPENAI_API_KEY`       | OpenAI API key; needed only for follow-up generation   |
-| `EMAIL_SEQUENCER_OPENAI_MODEL`         | Explicit Responses API text model ID; no default model |
-| `APP_PASSWORD`                         | Strong operator password, at least 16 characters       |
+| Variable                               | Value                                                                           |
+| -------------------------------------- | ------------------------------------------------------------------------------- |
+| `AIRTABLE_API_TOKEN`                   | Personal access token with record read/write access                             |
+| `AIRTABLE_BASE_ID`                     | `apphI2f8iKVYaDRbg`                                                             |
+| `EMAIL_SEQUENCER_GOOGLE_CLIENT_ID`     | Web OAuth client ID                                                             |
+| `EMAIL_SEQUENCER_GOOGLE_CLIENT_SECRET` | Web OAuth client secret                                                         |
+| `EMAIL_SEQUENCER_GOOGLE_REDIRECT_URI`  | Exact callback URL, HTTPS in production                                         |
+| `GMAIL_TOKEN_FILE`                     | Private writable file path on persistent storage                                |
+| `SEND_ATTEMPT_FILE`                    | Optional separate persistent journal; defaults to `<GMAIL_TOKEN_FILE>.attempts` |
+| `EMAIL_SEQUENCER_OPENAI_API_KEY`       | OpenAI API key; needed only for follow-up generation                            |
+| `EMAIL_SEQUENCER_OPENAI_MODEL`         | Explicit Responses API text model ID; no default model                          |
+| `APP_PASSWORD`                         | Strong operator password, at least 16 characters                                |
 
 Configuration is validated at the server boundary. Missing configuration produces named setup errors without printing values. Build does not require credentials. Never use `NEXT_PUBLIC_*` for these variables.
 
@@ -59,9 +69,13 @@ Configuration is validated at the server boundary. Missing configuration produce
 
 At Start, `runStartedAt` is captured once. Each query requests at most one Draft with Direction Outbound, Channel Email, nonblank Subject and Message, a Prospect relationship and `Created At <= runStartedAt`, sorted oldest first. Its linked Prospect is fetched to read Email. Candidates without Email are skipped one at a time; ambiguous multiple-Prospect links stop the run for correction. No queue is preloaded.
 
-After Gmail confirms success, the app saves `Status = Completed`, `Sent At`, `Gmail Message ID` and `Gmail Thread ID` in one Airtable update, waits the configured interval, then queries again. `Sent At` is the server timestamp when the Gmail success response is confirmed; Gmail's send response does not expose a separate delivery timestamp. It is not the time the run began. The final interval also elapses before the empty query completes the run.
+New outbound `Initial Message` drafts must have no sender attribution, initial-interaction link or existing Gmail identifiers. Available accounts are selected in stable mailbox-ID round-robin order. The last allocated ID persists across runs/restarts and advances when an attempt is durably reserved, including attempts that later definitely fail. Disconnected/unavailable accounts are skipped before submission; no available account stops the run with guidance. Follow-ups do not advance allocation. Unsupported or ambiguous conversation types are rejected unchanged.
 
-A definite Gmail rejection leaves the Draft untouched, displays the error and skips that record for the rest of the run. The same interval is respected after failed attempts. An uncertain outcome stops immediately without retrying. If Gmail succeeds but Airtable cannot confirm the update, the app also stops and displays the record ID, confirmed send time and both returned Gmail IDs for manual reconciliation. Check Gmail and fix Airtable before starting another run. The UI requires acknowledgement for these cases; it does not verify your manual reconciliation or automatically resend.
+After Gmail confirms success, the app saves `Status = Completed`, `Sent At`, `Gmail Message ID`, `Gmail Thread ID` and `Sent From Mailbox` in one Airtable update and verifies them together, waits the configured interval, then queries again. `Sent At` is the server timestamp when the Gmail success response is confirmed; Gmail's send response does not expose a separate delivery timestamp. It is not the time the run began. The final interval also elapses before the empty query completes the run.
+
+A definite Gmail rejection leaves the Draft untouched, displays the error and skips that record for the rest of the run. The same interval is respected after failed attempts. An uncertain outcome stops immediately without retrying or rotating sender. Before submission, a separate private durable journal records the Interaction and selected mailbox; if reservation fails, no send occurs. Confirmed Gmail identifiers are synced before Airtable completion. Attempts resolve only after verified completion or a definite non-send outcome. Any unresolved attempt blocks every new run across restarts.
+
+Overview displays the particular pending attempt, mailbox identity and known Gmail IDs. Check Sent mail in that mailbox. If sent, repair all five Airtable completion fields and choose **Sent — Airtable completion repaired**, then explicitly verify and reconcile; the server verifies completion and any known IDs. Only an unknown-outcome attempt can be marked **Definitely not sent**, after explicit manual verification. A review checkbox alone never clears durable protection, and an uncertain outcome is never permission to retry. Journal/write failures can conservatively require reconciliation even when Gmail was not contacted. Keep credentials and the journal on persistent storage; `SEND_ATTEMPT_FILE` must not point to a credential file.
 
 Stop cancels a pending wait. An in-flight send is allowed to finish and its result is saved before the run lock is released. Closing the browser does not stop the runner. Polling runs about every two seconds; connections are checked at run start and cached for up to 60 seconds while observing. Errors retain the latest 20 details plus the total failure count. Current Interaction and Last Sent are session state, not a separate durable history. Dates are displayed in Europe/London.
 
@@ -88,7 +102,9 @@ Steps live in `src/features/follow-ups/constants/steps.ts`: initially 3, 4 and 5
 
 Candidates are read in pages of 25 Prospects with linked history. Interaction reads use batches of up to 50 linked record IDs, not a full-table scan. Preparation rereads the Prospect and its history after generation; changed context, new replies and new Drafts prevent the write. The shared Airtable client spaces requests across both features. The run shows checked/eligible/drafted/skipped counts, grouped skip reasons, and the latest 20 errors with a total error count. Eligible counts include prospects whose generation or save subsequently failed.
 
-Created records are Outbound / Email / Follow-up / Draft, preserving the original subject and Gmail Thread ID. The new Gmail Message ID and Sent At remain blank, and Airtable supplies Created At. An unconfirmed create is never retried; inspect that Prospect's Interactions before rerunning. Single-process locking and Draft checks prevent normal duplicate runs; Airtable provides no transaction across the final read and write, so independent external automation must not concurrently prepare the same prospects.
+Created records are Outbound / Email / Follow-up / Draft, preserving the original subject and Gmail Thread ID. Every `Initial Interaction` points directly to the original completed Initial Message, never the previous follow-up. `Sent From Mailbox`, the new Gmail Message ID and Sent At remain blank; write confirmation verifies these relationships too. Airtable supplies Created At. An unconfirmed create is never retried; inspect that Prospect's Interactions before rerunning. Single-process locking and Draft checks prevent normal duplicate runs; Airtable provides no transaction across the final read and write, so independent external automation must not concurrently prepare the same prospects.
+
+Sending reloads that original Interaction and validates prospect, type/status, original timestamp/IDs, subject/thread and single-record sender ownership. The conversation identity is **mailbox plus Gmail thread ID**. The original account must be available; a follow-up never rotates to another account. Gmail thread checks use that account's credentials, verify the original message belongs to the thread and reject conversations with replies. Success attributes the follow-up to the same mailbox. Missing, conflicting or unavailable ownership leaves the draft unchanged with guidance. AI does not select senders.
 
 The sequencer retrieves Gmail metadata, validates the conversation's recipient/subject and RFC Message-ID, and supplies `threadId`, `In-Reply-To` and `References` when sending a reply. Encoded subjects are decoded with `libmime`. Missing or unverifiable threading fails before submission instead of sending a standalone follow-up. See [Gmail's threading requirements](https://developers.google.com/workspace/gmail/api/guides/threads) and [metadata access](https://developers.google.com/workspace/gmail/api/reference/rest/v1/users.threads/get).
 
@@ -121,11 +137,11 @@ docker run --name email-sequencer --restart unless-stopped \
   -v email-sequencer-data:/data email-sequencer
 ```
 
-Stop the sender and let any active preparation finish before deployments or shutdown. A process restart resets in-memory run state. A crash between Gmail acceptance and the Airtable update can leave a sent email as Draft: **inspect Gmail and reconcile that record before another run**. Exactly-once delivery across crashes is not guaranteed by this database-free V1. Tokens survive restarts only if their volume persists.
+Stop the sender and let any active preparation finish before deployments or shutdown. A process restart resets in-memory run state, but preserves the allocation cursor and unresolved attempt on the mounted volume. A crash between Gmail acceptance and confirmation can leave an unknown outcome: **inspect that mailbox and explicitly reconcile before another run**. This is conservative single-process protection, not distributed locking or exactly-once delivery. Credentials and protection survive restarts only if their volume persists. Do not delete/reset the journal to bypass reconciliation.
 
 ## Server structure
 
-`src/features/sequencer/server/index.ts` only exports the lazy composition entry point. `composition.ts` wires constructor-injected repository and service classes against interfaces and retains one runtime per process.
+`src/app/server/composition.ts` wires the independent mailbox and sequencer workflows against outreach repositories and infrastructure, retaining one runtime per process. Features do not import each other.
 
 - Repositories and storage mappers live in `src/modules/outreach`, grouped by entity. Feature composition injects them through narrow contracts.
 - `services/`: sequence eligibility, recipient resolution, sending and saving; connection checks, caching and mailbox changes.
@@ -152,8 +168,10 @@ Polling responses and failures from before a command cannot overwrite its result
 
 - `airtable/client.ts`: injected configuration and HTTP transport. Response schemas live in `schemas.ts`.
 - `gmail/client.ts`: Google SDK operations, send requests and safe rejection translation. Sends never retry automatically.
-- `gmail/service.ts`: OAuth state and PKCE coordination, token persistence coordination, connection checks and MIME preparation.
-- `gmail/token-store.ts`: private token-file reads and atomic writes. Tests use a mocked filesystem.
+- `gmail/authorization.ts`: single-use OAuth state, PKCE and reconnect intent; the client verifies identity and permissions.
+- `gmail/service.ts` and `gmail/mailbox-service.ts`: per-mailbox checks, MIME preparation and provider sending/thread checks.
+- `gmail/mailbox-token-store.ts`: serialized version-2 credentials and migration state; `token-store.ts` retains the legacy reader.
+- `send-attempts/store.ts`: the separate pending-attempt journal and allocation cursor. `storage/private-json-file.ts` owns private atomic synced JSON-file mechanics.
 - `email/`: provider-independent sender interface and message/result types.
 - `openai/client.ts`: bounded Responses API text generation; `text-generation/` owns its provider-independent interface.
 - `config/` and `http/`: environment validation and request/response helpers, respectively.

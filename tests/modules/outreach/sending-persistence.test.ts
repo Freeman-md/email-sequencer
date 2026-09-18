@@ -9,6 +9,7 @@ import { PROSPECT_TABLE } from '@/modules/outreach/prospects/airtable/fields';
 import { ProspectRepository } from '@/modules/outreach/prospects/airtable/prospect.repository';
 
 const confirmation = {
+  mailboxId: 'recMailboxA',
   kind: 'confirmed' as const,
   sentAt: '2026-09-09T12:00:00.000Z',
   gmailMessageId: 'gmail-id',
@@ -98,6 +99,7 @@ describe('Airtable contract', () => {
         'Sent At': cutoff,
         'Gmail Message ID': 'gmail-id',
         'Gmail Thread ID': 'thread-id',
+        'Sent From Mailbox': ['recMailboxA'],
       },
     });
     await new InteractionRepository({ request }).confirmSent(
@@ -112,6 +114,7 @@ describe('Airtable contract', () => {
           'Sent At': cutoff,
           'Gmail Message ID': 'gmail-id',
           'Gmail Thread ID': 'thread-id',
+          'Sent From Mailbox': ['recMailboxA'],
         },
       }),
     });

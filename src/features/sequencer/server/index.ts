@@ -1,1 +1,1 @@
-export { getSequencerServices } from './composition';
+export { SequencerService } from './services/sequencer.service';

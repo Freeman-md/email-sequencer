@@ -2,6 +2,7 @@ import { CurrentInteraction } from './CurrentInteraction';
 import { DashboardNotices, RunNotices } from './DashboardNotices';
 import { LastSent } from './LastSent';
 import { RunStatus } from './RunStatus';
+import { SendReconciliation } from './SendReconciliation';
 
 import type { useDashboardControls } from '../hooks/use-dashboard-controls';
 import type { CurrentInteractionPresentation } from '../presenters/current-interaction';
@@ -14,19 +15,28 @@ export function Overview({
   data,
   displayError,
   oauthFailed,
+  oauthFailureDetail,
   run,
   current,
   status,
   controls,
+  busy,
+  onReconcile,
 }: {
   children?: ReactNode;
   data: DashboardState | null;
   displayError?: string;
   oauthFailed: boolean;
+  oauthFailureDetail?: string;
   run: RunState;
   current: CurrentInteractionPresentation;
   status: RunStatusPresentation;
   controls: ReturnType<typeof useDashboardControls>;
+  busy: boolean;
+  onReconcile: (
+    attemptId: string,
+    outcome: 'sent' | 'not-sent',
+  ) => Promise<void>;
 }) {
   const panelState =
     run.status === 'error'
@@ -44,7 +54,20 @@ export function Overview({
         data={data}
         displayError={displayError}
         oauthFailed={oauthFailed}
+        oauthFailureDetail={oauthFailureDetail}
       />
+      <p className="footnote">
+        Automatic distribution: new conversations rotate across available
+        mailboxes. Follow-ups always use their original sender.
+      </p>
+      {data?.pendingAttempt && run.status !== 'running' && (
+        <SendReconciliation
+          key={data.pendingAttempt.id}
+          attempt={data.pendingAttempt}
+          disabled={busy}
+          onReconcile={onReconcile}
+        />
+      )}
       <div className={`operational-surface ${panelState}`}>
         <CurrentInteraction presentation={current} />
         <RunStatus run={run} presentation={status} controls={controls} />

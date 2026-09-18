@@ -10,7 +10,6 @@ import { presentCurrentInteraction } from '../presenters/current-interaction';
 import { presentRunStatus } from '../presenters/run-status';
 
 import { DashboardHeader } from './DashboardHeader';
-import { MailboxManagement } from './MailboxManagement';
 import { Overview } from './Overview';
 
 import type { DashboardState } from '../types';
@@ -21,16 +20,21 @@ export function SequencerPanel({
   initial,
   initialError,
   oauthFailed = false,
+  oauthFailureDetail,
+  renderMailboxes,
 }: {
   children?: ReactNode;
   initial: DashboardState | null;
   initialError?: string;
   oauthFailed?: boolean;
+  oauthFailureDetail?: string;
+  renderMailboxes: (active: boolean) => ReactNode;
 }) {
   const [activeView, setActiveView] = useState<'overview' | 'mailboxes'>(
     'overview',
   );
-  const { data, error, busy, command, clockSample } = useSequencer(initial);
+  const { data, error, busy, command, clockSample, reconcile } =
+    useSequencer(initial);
   const run = data?.run ?? initialRunState();
   const controls = useDashboardControls({ data, run, error, busy, command });
   const now = useServerClock(clockSample, initial?.serverNow);
@@ -55,16 +59,19 @@ export function SequencerPanel({
           data={data}
           displayError={displayError}
           oauthFailed={oauthFailed}
+          oauthFailureDetail={oauthFailureDetail}
           run={run}
           current={current}
           status={status}
           controls={controls}
+          busy={busy}
+          onReconcile={reconcile}
         >
           {children}
         </Overview>
       </div>
       <div hidden={activeView !== 'mailboxes'}>
-        <MailboxManagement gmail={data?.gmail} run={run} />
+        {renderMailboxes(run.status === 'running')}
       </div>
     </main>
   );

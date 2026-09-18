@@ -4,10 +4,12 @@ export function DashboardNotices({
   data,
   displayError,
   oauthFailed,
+  oauthFailureDetail,
 }: {
   data: DashboardState | null;
   displayError?: string | null;
   oauthFailed: boolean;
+  oauthFailureDetail?: string;
 }) {
   return (
     <>
@@ -19,8 +21,13 @@ export function DashboardNotices({
       {oauthFailed && (
         <div className="notice danger" role="alert">
           Gmail connection failed or was cancelled. Check Google OAuth settings,
-          grant send permission and verify token file permissions, then connect
-          again.
+          grant send/metadata permissions and offline access, and verify private
+          file permissions, then connect again.
+        </div>
+      )}
+      {oauthFailureDetail && (
+        <div className="notice danger" role="alert">
+          {oauthFailureDetail}
         </div>
       )}
       {data && !data.airtable.connected && (

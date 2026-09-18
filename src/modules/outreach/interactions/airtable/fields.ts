@@ -11,5 +11,7 @@ export const INTERACTION_FIELDS = {
   prospect: 'Prospect',
   createdAt: 'Created At',
   sentAt: 'Sent At',
+  mailbox: 'Sent From Mailbox',
+  initialInteraction: 'Initial Interaction',
 } as const;
 export const RECEIVED_AT_FIELD = 'Received At';

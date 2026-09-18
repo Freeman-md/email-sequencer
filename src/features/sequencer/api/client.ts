@@ -26,6 +26,23 @@ export class SequencerClient implements ISequencerClient {
     return this.mutate('stop', {}, signal);
   }
 
+  reconcile(
+    attemptId: string,
+    outcome: 'sent' | 'not-sent',
+    signal: AbortSignal,
+  ) {
+    return this.read<DashboardState>(
+      'reconcile',
+      {
+        method: 'POST',
+        signal,
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ attemptId, outcome, verified: true }),
+      },
+      'Reconciliation was not confirmed. Refresh and check this attempt.',
+    );
+  }
+
   private mutate(action: 'start' | 'stop', body: object, signal: AbortSignal) {
     return this.read<RunState>(
       action,

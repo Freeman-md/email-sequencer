@@ -3,6 +3,7 @@ import type {
   HistoryInteraction,
   FollowUpDraft,
   SentConfirmation,
+  SendingInteraction,
 } from '../types';
 
 export interface IDraftQueueRepository {
@@ -12,6 +13,7 @@ export interface IDraftQueueRepository {
   ): Promise<DraftCandidate | null>;
   confirmSent(id: string, confirmation: SentConfirmation): Promise<void>;
   checkConnection(): Promise<void>;
+  findById(id: string): Promise<SendingInteraction>;
 }
 
 export interface IFollowUpDraftRepository {

@@ -12,6 +12,8 @@ it('creates a linked Draft with the original subject/thread and no send identifi
     Message: 'Follow-up body',
     Prospect: ['recProspect'],
     'Gmail Thread ID': 'thread1',
+    'Initial Interaction': ['recInitial'],
+    'Sent From Mailbox': [],
   };
   const request = vi.fn().mockResolvedValue({ id: 'recDraft', fields });
   const repository = new InteractionRepository({ request });
@@ -20,6 +22,7 @@ it('creates a linked Draft with the original subject/thread and no send identifi
     subject: 'Original',
     message: 'Follow-up body',
     gmailThreadId: 'thread1',
+    initialInteractionId: 'recInitial',
   });
   expect(JSON.parse(request.mock.calls[0]?.[1].body)).toEqual({ fields });
   request.mockResolvedValue({
@@ -32,6 +35,7 @@ it('creates a linked Draft with the original subject/thread and no send identifi
       subject: 'Original',
       message: 'Follow-up body',
       gmailThreadId: 'thread1',
+      initialInteractionId: 'recInitial',
     }),
   ).rejects.toThrow('did not confirm');
 });

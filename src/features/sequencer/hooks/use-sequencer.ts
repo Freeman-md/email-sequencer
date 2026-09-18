@@ -109,5 +109,39 @@ export function useSequencer(
     [client],
   );
 
-  return { data, error, busy, command, clockSample };
+  async function reconcile(attemptId: string, outcome: 'sent' | 'not-sent') {
+    const controller = lifecycle.current;
+    if (!controller || controller.signal.aborted || pendingCommand.current) {
+      return;
+    }
+    pendingCommand.current = true;
+    version.current++;
+    setBusy(true);
+
+    try {
+      const result = await client.reconcile(
+        attemptId,
+        outcome,
+        controller.signal,
+      );
+      if (!controller.signal.aborted) {
+        setData(result);
+        setError(null);
+      }
+    } catch (cause) {
+      if (!controller.signal.aborted) {
+        setError(
+          cause instanceof Error ? cause.message : 'Reconciliation failed.',
+        );
+      }
+    } finally {
+      version.current++;
+      pendingCommand.current = false;
+      if (!controller.signal.aborted) {
+        setBusy(false);
+      }
+    }
+  }
+
+  return { data, error, busy, command, clockSample, reconcile };
 }

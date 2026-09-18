@@ -4,12 +4,17 @@ import { initialRunState } from '../../src/features/sequencer/constants/run';
 import type { DashboardState } from '../../src/features/sequencer/types';
 
 test.beforeEach(async ({ page }) => {
+  await page.route('**/api/mailboxes', (route) =>
+    route.fulfill({ json: { mailboxes: fixture().mailboxes } }),
+  );
   await page.route('**/api/follow-ups/**', (route) =>
     route.fulfill({ json: initialPreparationState() }),
   );
 });
 
 const current = {
+  mailboxId: 'recMailboxA',
+  mailboxEmail: 'sender-a@example.com',
   id: 'recTest',
   prospect: 'Maya Chen',
   company: 'Northstar Labs',
@@ -18,6 +23,8 @@ const current = {
   createdAt: '2026-09-09T07:42:00.000Z',
 };
 const lastSent = {
+  mailboxId: 'recMailboxB',
+  mailboxEmail: 'sender-b@example.com',
   id: 'recPrevious',
   prospect: 'Jordan Lee',
   company: 'Rivermere Consulting',
@@ -30,6 +37,16 @@ function fixture(): DashboardState {
   return {
     airtable: { connected: true, detail: 'Connected' },
     gmail: { connected: true, detail: 'maya.ops@gmail.com' },
+    mailboxes: [
+      {
+        id: 'recMailboxA',
+        email: 'maya.ops@gmail.com',
+        connected: true,
+        hasCredentials: true,
+        detail: 'Available for sending',
+      },
+    ],
+    pendingAttempt: null,
     serverNow: '2026-09-09T12:10:42.000Z',
     run: { ...initialRunState(), lastSent },
   };
@@ -151,6 +168,178 @@ test('desktop states, controls and mobile preserve operational fields without ov
     fullPage: true,
   });
   expect(errors).toEqual([]);
+});
+
+test('manages independent mailboxes, restores reconnect identity and retains send attribution', async ({
+  page,
+}) => {
+  const state = fixture();
+  const mailboxes = {
+    mailboxes: [
+      ...state.mailboxes,
+      {
+        id: 'recMailboxB',
+        email: 'second@example.com',
+        connected: false,
+        hasCredentials: true,
+        detail: 'Google authorization expired. Reconnect this account.',
+      },
+    ],
+  };
+  let disconnected: string | undefined;
+  let connected: string | null | undefined;
+  await page.route('**/api/sequencer/**', (route) =>
+    route.fulfill({ json: state }),
+  );
+  await page.route('**/api/mailboxes', async (route) => {
+    if (route.request().method() === 'DELETE') {
+      disconnected = route.request().postDataJSON().mailboxId;
+      const selected = mailboxes.mailboxes.find(
+        (mailbox) => mailbox.id === disconnected,
+      )!;
+      selected.connected = false;
+      selected.hasCredentials = false;
+      selected.detail = 'Disconnected locally. Reconnect this account to send.';
+    }
+    await route.fulfill({ json: mailboxes });
+  });
+  await page.route('**/api/gmail/connect*', async (route) => {
+    connected = new URL(route.request().url()).searchParams.get('mailboxId');
+    if (connected) {
+      const selected = mailboxes.mailboxes.find(
+        (mailbox) => mailbox.id === connected,
+      )!;
+      selected.connected = true;
+      selected.hasCredentials = true;
+      selected.detail = 'Available for sending';
+    } else {
+      mailboxes.mailboxes.push({
+        id: 'recMailboxC',
+        email: 'third@example.com',
+        connected: true,
+        hasCredentials: true,
+        detail: 'Available for sending',
+      });
+    }
+    await route.fulfill({
+      status: 302,
+      headers: { location: '/?gmail=connected' },
+    });
+  });
+  await page.goto('/');
+  await expect(
+    page.getByText('Sent from sender-b@example.com (recMailboxB)'),
+  ).toBeVisible();
+  await page.getByRole('button', { name: 'Mailboxes', exact: true }).click();
+  const first = page.getByRole('region', {
+    name: 'maya.ops@gmail.com',
+    exact: true,
+  });
+  const second = page.getByRole('region', {
+    name: 'second@example.com',
+    exact: true,
+  });
+  await expect(first.getByText('Connected', { exact: true })).toBeVisible();
+  await expect(second.getByText('Unavailable', { exact: true })).toBeVisible();
+  await first.getByRole('button', { name: 'Disconnect', exact: true }).click();
+  expect(disconnected).toBe('recMailboxA');
+  await expect(first.getByText('Disconnected', { exact: true })).toBeVisible();
+  await expect(second.getByText('Unavailable', { exact: true })).toBeVisible();
+  await first.getByRole('link', { name: 'Reconnect Gmail' }).click();
+  await expect(
+    page.getByRole('button', { name: 'Mailboxes', exact: true }),
+  ).toBeVisible();
+  expect(connected).toBe('recMailboxA');
+  await page.getByRole('button', { name: 'Mailboxes', exact: true }).click();
+  await expect(first.getByText('Connected', { exact: true })).toBeVisible();
+  await page.getByRole('link', { name: 'Add Mailbox' }).click();
+  await expect(
+    page.getByRole('button', { name: 'Mailboxes', exact: true }),
+  ).toBeVisible();
+  expect(connected).toBeNull();
+  await page.getByRole('button', { name: 'Mailboxes', exact: true }).click();
+  await expect(
+    page.getByRole('heading', { name: 'third@example.com' }),
+  ).toBeVisible();
+  await page.screenshot({
+    path: 'output/playwright/multiple-mailboxes-desktop.png',
+    fullPage: true,
+  });
+  await page.setViewportSize({ width: 390, height: 1000 });
+  expect(
+    await page.evaluate(
+      () => document.documentElement.scrollWidth <= window.innerWidth,
+    ),
+  ).toBe(true);
+  await page.screenshot({
+    path: 'output/playwright/multiple-mailboxes-mobile.png',
+    fullPage: true,
+  });
+  for (const control of await page
+    .locator('.mailbox-actions a, .mailbox-actions button')
+    .all()) {
+    const bounds = await control.boundingBox();
+    expect(bounds?.height).toBeGreaterThanOrEqual(44);
+    expect(bounds?.width).toBeGreaterThanOrEqual(44);
+  }
+  await page.getByRole('button', { name: 'Overview', exact: true }).click();
+  await expect(
+    page.getByText('Sent from sender-b@example.com (recMailboxB)'),
+  ).toBeVisible();
+});
+
+test('restart-visible unresolved attempts block sending until explicit reconciliation', async ({
+  page,
+}) => {
+  const state = fixture();
+  state.pendingAttempt = {
+    id: 'attempt-previous',
+    interactionId: 'recPrevious',
+    mailboxId: 'recMailboxB',
+    mailboxEmail: 'sender-b@example.com',
+    reservedAt: '2026-09-18T12:00:00.000Z',
+  };
+  await page.route('**/api/sequencer/**', async (route) => {
+    if (route.request().url().endsWith('/reconcile')) {
+      expect(route.request().postDataJSON()).toEqual({
+        attemptId: 'attempt-previous',
+        outcome: 'sent',
+        verified: true,
+      });
+      state.pendingAttempt = null;
+    }
+    await route.fulfill({ json: state });
+  });
+  await page.goto('/');
+  await expect(
+    page.getByRole('button', { name: 'Start Run', exact: true }),
+  ).toBeDisabled();
+  await expect(
+    page.getByRole('heading', { name: 'Unresolved send — sending is blocked' }),
+  ).toBeVisible();
+  await page.screenshot({
+    path: 'output/playwright/reconciliation-desktop.png',
+    fullPage: true,
+  });
+  await page.setViewportSize({ width: 390, height: 1000 });
+  expect(
+    await page.evaluate(
+      () => document.documentElement.scrollWidth <= window.innerWidth,
+    ),
+  ).toBe(true);
+  await page.screenshot({
+    path: 'output/playwright/reconciliation-mobile.png',
+    fullPage: true,
+  });
+  await page
+    .getByLabel(
+      'I verified this particular attempt in the selected mailbox and Airtable.',
+    )
+    .check();
+  await page.getByRole('button', { name: 'Reconcile Attempt' }).click();
+  await expect(
+    page.getByRole('button', { name: 'Start Run', exact: true }),
+  ).toBeEnabled();
 });
 
 test('mailbox navigation preserves the live run and locks connection changes', async ({

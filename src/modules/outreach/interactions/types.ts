@@ -1,4 +1,4 @@
-export type DraftCandidate = {
+export type SendingInteraction = {
   id: string;
   type: string;
   gmailThreadId: string;
@@ -10,10 +10,14 @@ export type DraftCandidate = {
   message: string;
   prospectIds: string[];
   createdAt: string;
+  sentAt: string;
+  mailboxIds: string[];
+  initialInteractionIds: string[];
 };
 
-export type HistoryInteraction = DraftCandidate & {
-  sentAt: string;
+export type DraftCandidate = SendingInteraction;
+
+export type HistoryInteraction = SendingInteraction & {
   receivedAt: string;
 };
 export type FollowUpDraft = {
@@ -21,9 +25,11 @@ export type FollowUpDraft = {
   subject: string;
   message: string;
   gmailThreadId: string;
+  initialInteractionId: string;
 };
 
 export type SentConfirmation = {
+  mailboxId: string;
   sentAt: string;
   gmailMessageId: string;
   gmailThreadId: string;

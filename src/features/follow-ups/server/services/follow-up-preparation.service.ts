@@ -308,6 +308,7 @@ export class FollowUpPreparationService implements IFollowUpPreparationService {
       subject: due.original.subject,
       message,
       gmailThreadId: due.original.gmailThreadId,
+      initialInteractionId: due.original.id,
     });
   }
 

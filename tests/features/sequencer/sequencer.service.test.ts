@@ -5,6 +5,7 @@ import { SequencerService } from '@/features/sequencer/server/services/sequencer
 
 import type { Interaction } from '@/features/sequencer/server/types/interaction';
 import type { SendResult } from '@/infrastructure/email/types/send-result';
+import type { AttemptState } from '@/infrastructure/send-attempts/store';
 import type { DraftCandidate } from '@/modules/outreach/interactions';
 
 const startedAt = '2026-09-09T12:00:00.000Z';
@@ -18,6 +19,8 @@ const interaction: Interaction = {
   isFollowUp: false,
   message: 'Hello Maya,\nHere is the message.',
   createdAt: '2026-09-09T08:00:00.000Z',
+  mailboxId: 'recMailboxA',
+  mailboxEmail: 'operator@example.com',
 };
 const candidate: DraftCandidate = {
   id: interaction.id,
@@ -31,9 +34,12 @@ const candidate: DraftCandidate = {
   subject: interaction.subject,
   message: interaction.message,
   createdAt: interaction.createdAt,
+  sentAt: '',
+  mailboxIds: [],
+  initialInteractionIds: [],
 };
 const flush = async () => {
-  for (let i = 0; i < 12; i++) await Promise.resolve();
+  for (let i = 0; i < 60; i++) await Promise.resolve();
 };
 function setup() {
   const findNextDraft = vi
@@ -55,26 +61,346 @@ function setup() {
     email: interaction.email,
   });
   const runtime = new SequencerRuntime();
+  const mailbox = {
+    id: 'recMailboxA',
+    email: 'operator@example.com',
+    connected: true,
+    hasCredentials: true,
+    detail: 'Available',
+  };
+  const mailboxes = {
+    getState: vi.fn().mockResolvedValue({ mailboxes: [mailbox] }),
+  };
+  const state: AttemptState = {
+    version: 1,
+    pending: null,
+    lastAllocatedMailboxId: null,
+  };
+  const attempts = {
+    read: vi.fn(async () => structuredClone(state)),
+    reserve: vi.fn(async (input, advance) => {
+      if (state.pending) throw new Error('Unresolved attempt');
+      state.pending = { ...input, id: 'attempt-test', reservedAt: startedAt };
+      if (advance) state.lastAllocatedMailboxId = input.mailboxId;
+
+      return state.pending!;
+    }),
+    confirm: vi.fn(async (_id, confirmation) => {
+      state.pending!.confirmation = confirmation;
+    }),
+    resolve: vi.fn(async () => {
+      state.pending = null;
+    }),
+  };
+  const findById = vi.fn();
 
   return {
+    state,
     findContactById,
     runtime,
     findNextDraft,
     confirmSent,
     send,
     check,
+    attempts,
+    mailboxes,
+    findById,
     runner: new SequencerService(
-      { findNextDraft, confirmSent, checkConnection: vi.fn() },
+      { findNextDraft, confirmSent, findById, checkConnection: vi.fn() },
       { findContactById, checkConnection: vi.fn() },
       { send },
-      { requireReady: check, getState: vi.fn(), connectGmail: vi.fn() },
+      { requireReady: check, getState: vi.fn() },
       runtime,
+      mailboxes,
+      attempts,
     ),
   };
 }
 beforeEach(() => {
   vi.useFakeTimers();
   vi.setSystemTime(new Date(startedAt));
+});
+
+it('advances the persisted allocation cursor on reservation and skips unavailable accounts', async () => {
+  const { runner, mailboxes, findNextDraft, send, attempts, state } = setup();
+  mailboxes.getState.mockResolvedValue({
+    mailboxes: [
+      {
+        id: 'recMailboxC',
+        email: 'c@example.com',
+        connected: true,
+        hasCredentials: true,
+        detail: 'Available',
+      },
+      {
+        id: 'recMailboxB',
+        email: 'b@example.com',
+        connected: false,
+        hasCredentials: true,
+        detail: 'Unavailable',
+      },
+      {
+        id: 'recMailboxA',
+        email: 'operator@example.com',
+        connected: true,
+        hasCredentials: true,
+        detail: 'Available',
+      },
+    ],
+  });
+  state.lastAllocatedMailboxId = 'recMailboxA';
+  send.mockResolvedValue({ kind: 'definite', message: 'Rejected' });
+  runner.start(1);
+  await vi.runAllTimersAsync();
+  expect(send).toHaveBeenCalledWith(
+    expect.objectContaining({ mailboxId: 'recMailboxC' }),
+  );
+  expect(attempts.reserve).toHaveBeenCalledWith(
+    expect.objectContaining({ mailboxId: 'recMailboxC' }),
+    true,
+  );
+  findNextDraft.mockResolvedValueOnce(candidate);
+  runner.start(1);
+  await vi.runAllTimersAsync();
+  expect(send).toHaveBeenLastCalledWith(
+    expect.objectContaining({ mailboxId: 'recMailboxA' }),
+  );
+});
+
+it('uses the root mailbox for follow-ups without advancing allocation', async () => {
+  const {
+    runner,
+    mailboxes,
+    findNextDraft,
+    findById,
+    send,
+    attempts,
+    state,
+    confirmSent,
+  } = setup();
+  state.lastAllocatedMailboxId = 'recMailboxB';
+  const draft = {
+    ...candidate,
+    type: 'Follow-up',
+    gmailThreadId: 'thread-id',
+    initialInteractionIds: ['recRoot'],
+  };
+  findNextDraft
+    .mockReset()
+    .mockResolvedValueOnce(draft)
+    .mockResolvedValue(null);
+  findById.mockResolvedValue({
+    ...candidate,
+    id: 'recRoot',
+    status: 'Completed',
+    gmailMessageId: 'original-id',
+    gmailThreadId: 'thread-id',
+    sentAt: startedAt,
+    mailboxIds: ['recMailboxB'],
+  });
+  mailboxes.getState.mockResolvedValue({
+    mailboxes: [
+      {
+        id: 'recMailboxA',
+        email: 'a@example.com',
+        connected: true,
+        hasCredentials: true,
+        detail: 'Available',
+      },
+      {
+        id: 'recMailboxB',
+        email: 'b@example.com',
+        connected: true,
+        hasCredentials: true,
+        detail: 'Available',
+      },
+    ],
+  });
+  runner.start(1);
+  await vi.runAllTimersAsync();
+  expect(findById).toHaveBeenCalledWith('recRoot');
+  expect(send).toHaveBeenCalledWith(
+    expect.objectContaining({ mailboxId: 'recMailboxB', isFollowUp: true }),
+  );
+  expect(attempts.reserve).toHaveBeenCalledWith(
+    expect.objectContaining({ mailboxId: 'recMailboxB' }),
+    false,
+  );
+  expect(confirmSent).toHaveBeenCalledWith(
+    candidate.id,
+    expect.objectContaining({ mailboxId: 'recMailboxB' }),
+  );
+  expect(state.lastAllocatedMailboxId).toBe('recMailboxB');
+});
+
+it.each([
+  'missing-root',
+  'multiple-roots',
+  'self-root',
+  'preassigned-sender',
+  'unsupported-type',
+])(
+  'rejects an ambiguous outbound draft with %s without reserving or sending',
+  async (failure) => {
+    const { runner, findNextDraft, send, attempts, confirmSent } = setup();
+    const draft = {
+      ...candidate,
+      type: 'Follow-up',
+      gmailThreadId: 'thread-id',
+      initialInteractionIds: ['recRoot'],
+    };
+    if (failure === 'missing-root') {
+      draft.initialInteractionIds = [];
+    }
+    if (failure === 'multiple-roots') {
+      draft.initialInteractionIds = ['recRoot', 'recOtherRoot'];
+    }
+    if (failure === 'self-root') {
+      draft.initialInteractionIds = [candidate.id];
+    }
+    if (failure === 'preassigned-sender') {
+      draft.mailboxIds = ['recMailboxA'];
+    }
+    if (failure === 'unsupported-type') {
+      draft.type = 'Reply';
+    }
+    findNextDraft
+      .mockReset()
+      .mockResolvedValueOnce(draft)
+      .mockResolvedValue(null);
+    runner.start(1);
+    await vi.runAllTimersAsync();
+    expect(send).not.toHaveBeenCalled();
+    expect(attempts.reserve).not.toHaveBeenCalled();
+    expect(confirmSent).not.toHaveBeenCalled();
+    expect(runner.snapshot().failureCount).toBe(1);
+  },
+);
+
+it.each([
+  'missing-owner',
+  'conflicting-thread',
+  'different-prospect',
+  'unavailable-owner',
+])('does not rotate a follow-up with %s', async (failure) => {
+  const { runner, findNextDraft, findById, send, confirmSent, attempts } =
+    setup();
+  findNextDraft
+    .mockReset()
+    .mockResolvedValueOnce({
+      ...candidate,
+      type: 'Follow-up',
+      gmailThreadId: 'thread-id',
+      initialInteractionIds: ['recRoot'],
+    })
+    .mockResolvedValue(null);
+  findById.mockResolvedValue({
+    ...candidate,
+    id: 'recRoot',
+    status: 'Completed',
+    gmailMessageId: 'original-id',
+    gmailThreadId:
+      failure === 'conflicting-thread' ? 'other-thread' : 'thread-id',
+    sentAt: startedAt,
+    prospectIds:
+      failure === 'different-prospect' ? ['recOther'] : candidate.prospectIds,
+    mailboxIds:
+      failure === 'missing-owner'
+        ? []
+        : [failure === 'unavailable-owner' ? 'recDisconnected' : 'recMailboxA'],
+  });
+  runner.start(1);
+  await vi.runAllTimersAsync();
+  expect(send).not.toHaveBeenCalled();
+  expect(confirmSent).not.toHaveBeenCalled();
+  expect(attempts.reserve).not.toHaveBeenCalled();
+  expect(runner.snapshot().failureCount).toBe(1);
+});
+
+it('stops before submission if there is no available sender or a reservation cannot be saved', async () => {
+  const first = setup();
+  first.mailboxes.getState.mockResolvedValue({ mailboxes: [] });
+  first.runner.start(1);
+  await flush();
+  expect(first.send).not.toHaveBeenCalled();
+  expect(first.runner.snapshot().errors[0]?.message).toContain(
+    'No mailbox is available',
+  );
+  const second = setup();
+  second.attempts.reserve.mockRejectedValue(
+    new Error('Persistent storage unavailable'),
+  );
+  second.runner.start(1);
+  await flush();
+  expect(second.send).not.toHaveBeenCalled();
+  expect(second.runner.snapshot().errors[0]?.message).toContain(
+    'Persistent storage unavailable',
+  );
+});
+
+it('blocks a new run on a durable unresolved attempt and requires particular-attempt reconciliation', async () => {
+  const { runner, state, send, findNextDraft, findById } = setup();
+  state.pending = {
+    id: 'previous-attempt',
+    interactionId: 'recPrevious',
+    mailboxId: 'recMailboxA',
+    mailboxEmail: 'a@example.com',
+    reservedAt: startedAt,
+    confirmation: {
+      sentAt: startedAt,
+      gmailMessageId: 'previous-message',
+      gmailThreadId: 'previous-thread',
+    },
+  };
+  runner.start(1);
+  await flush();
+  expect(send).not.toHaveBeenCalled();
+  expect(findNextDraft).not.toHaveBeenCalled();
+  await expect(runner.reconcile('wrong-attempt', 'sent')).rejects.toThrow(
+    'no longer matches',
+  );
+  await expect(
+    runner.reconcile('previous-attempt', 'not-sent'),
+  ).rejects.toThrow('Gmail confirmed');
+  findById.mockResolvedValue({ ...candidate, status: 'Draft' });
+  await expect(runner.reconcile('previous-attempt', 'sent')).rejects.toThrow(
+    'do not match',
+  );
+  findById.mockResolvedValue({
+    ...candidate,
+    status: 'Completed',
+    mailboxIds: ['recMailboxA'],
+    sentAt: startedAt,
+    gmailMessageId: 'previous-message',
+    gmailThreadId: 'previous-thread',
+  });
+  await runner.reconcile('previous-attempt', 'sent');
+  expect(state.pending).toBeNull();
+});
+
+it('persists Gmail confirmation before Airtable and retains it on completion failure', async () => {
+  const { runner, attempts, confirmSent, state, send } = setup();
+  send.mockImplementation(async () => {
+    expect(state.pending?.mailboxId).toBe('recMailboxA');
+
+    return {
+      kind: 'confirmed',
+      gmailMessageId: 'message-id',
+      gmailThreadId: 'thread-id',
+      sentAt: startedAt,
+    };
+  });
+  confirmSent.mockImplementation(async () => {
+    expect(state.pending?.confirmation?.gmailMessageId).toBe('message-id');
+    throw new Error('Synthetic Airtable outage');
+  });
+  runner.start(1);
+  await flush();
+  expect(attempts.resolve).not.toHaveBeenCalled();
+  expect(state.pending?.confirmation?.gmailMessageId).toBe('message-id');
+  expect(runner.snapshot().errors[0]?.message).toContain(
+    'mailbox operator@example.com (recMailboxA)',
+  );
 });
 afterEach(() => vi.useRealTimers());
 
@@ -86,6 +412,7 @@ describe('one-at-a-time run lifecycle', () => {
     expect(findNextDraft).toHaveBeenCalledTimes(1);
     expect(send).toHaveBeenCalledWith(interaction);
     expect(confirmSent).toHaveBeenCalledWith(interaction.id, {
+      mailboxId: interaction.mailboxId,
       sentAt: '2026-09-09T12:00:01.000Z',
       gmailMessageId: 'gmail-id',
       gmailThreadId: 'thread-id',
@@ -129,6 +456,7 @@ describe('one-at-a-time run lifecycle', () => {
     });
     await flush();
     expect(confirmSent).toHaveBeenCalledExactlyOnceWith(interaction.id, {
+      mailboxId: interaction.mailboxId,
       sentAt: startedAt,
       gmailMessageId: 'gmail-id',
       gmailThreadId: 'thread-id',
@@ -172,7 +500,7 @@ describe('one-at-a-time run lifecycle', () => {
       errors: [
         {
           kind: 'uncertain',
-          message: 'Timed out',
+          message: expect.stringContaining('Timed out'),
           interactionId: interaction.id,
         },
       ],

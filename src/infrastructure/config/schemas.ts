@@ -22,6 +22,7 @@ export const configSchema = z.object({
     );
   }, 'Use https://your-host/api/gmail/callback (HTTP is allowed only on localhost).'),
   GMAIL_TOKEN_FILE: z.string().min(1),
+  SEND_ATTEMPT_FILE: z.string().min(1).optional(),
   APP_PASSWORD: z.string().min(16),
 });
 

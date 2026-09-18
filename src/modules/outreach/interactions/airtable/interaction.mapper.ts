@@ -22,6 +22,9 @@ export function mapDraftCandidate(record: AirtableRecord): DraftCandidate {
     message: textField(record, field.message),
     prospectIds: linksField(record, field.prospect),
     createdAt: textField(record, field.createdAt),
+    sentAt: textField(record, field.sentAt),
+    mailboxIds: linksField(record, field.mailbox),
+    initialInteractionIds: linksField(record, field.initialInteraction),
   };
 }
 
@@ -29,6 +32,7 @@ export function mapInteractionCompletion(record: AirtableRecord) {
   return {
     id: record.id,
     status: textField(record, field.status),
+    mailboxIds: linksField(record, field.mailbox),
     sentAt: textField(record, field.sentAt),
     gmailMessageId: textField(record, field.gmailMessageId),
     gmailThreadId: textField(record, field.gmailThreadId),
@@ -40,7 +44,6 @@ export function mapInteractionHistory(
 ): HistoryInteraction {
   return {
     ...mapDraftCandidate(record),
-    sentAt: textField(record, field.sentAt),
     receivedAt: textField(record, RECEIVED_AT_FIELD),
   };
 }
@@ -55,5 +58,7 @@ export function draftFields(draft: FollowUpDraft) {
     [field.message]: draft.message,
     [field.prospect]: [draft.prospectId],
     [field.gmailThreadId]: draft.gmailThreadId,
+    [field.initialInteraction]: [draft.initialInteractionId],
+    [field.mailbox]: [],
   };
 }

@@ -43,6 +43,29 @@ export function assessFollowUp(
   }
 
   const sequence = outbound;
+  if (
+    original.mailboxIds.length !== 1 ||
+    original.initialInteractionIds.length !== 0
+  ) {
+    return {
+      reason:
+        'Missing or ambiguous original mailbox ownership; reconcile historical records',
+    };
+  }
+  if (
+    sequence.some(
+      (item) =>
+        item.mailboxIds.length !== 1 ||
+        item.mailboxIds[0] !== original.mailboxIds[0] ||
+        (item.type === 'Follow-up' &&
+          (item.initialInteractionIds.length !== 1 ||
+            item.initialInteractionIds[0] !== original.id)),
+    )
+  ) {
+    return {
+      reason: 'Conflicting sender ownership or initial conversation links',
+    };
+  }
   const latest = sequence.at(-1)!;
   if (hasAmbiguousOutboundOrder(sequence)) {
     return { reason: 'Ambiguous outbound order' };

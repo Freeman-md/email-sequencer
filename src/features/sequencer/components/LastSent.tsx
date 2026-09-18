@@ -13,6 +13,11 @@ export function LastSent({ sent }: { sent: SentInteraction | null }) {
         <>
           <p>{sent.subject}</p>
           <p>{sent.company}</p>
+          {sent.mailboxEmail && (
+            <p>
+              Sent from {sent.mailboxEmail} ({sent.mailboxId})
+            </p>
+          )}
           <p>Confirmed {dateTime(sent.sentAt)}</p>
         </>
       )}

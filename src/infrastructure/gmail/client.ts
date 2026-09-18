@@ -31,7 +31,7 @@ export class GmailClient implements IGmailClient {
       verifier: codes.codeVerifier,
       url: client.generateAuthUrl({
         access_type: 'offline',
-        prompt: 'consent',
+        prompt: 'consent select_account',
         scope: [GMAIL_SEND_SCOPE, GMAIL_METADATA_SCOPE, 'openid', 'email'],
         state,
         code_challenge: codes.codeChallenge,
@@ -59,13 +59,41 @@ export class GmailClient implements IGmailClient {
     });
     const identity = ticket.getPayload();
 
-    if (!identity?.email || !identity.email_verified)
+    if (!identity?.email || !identity.email_verified || !identity.sub)
       throw new Error('No verified email');
 
     return {
       email: identity.email,
+      googleSubject: identity.sub,
       refreshToken: tokens.refresh_token ?? undefined,
     };
+  }
+
+  async verifiedRefreshIdentity(refreshToken: string) {
+    const client = this.createOAuthClient();
+    client.setCredentials({ refresh_token: refreshToken });
+    const access = await client.getAccessToken();
+    if (!access.token || !client.credentials.id_token) {
+      throw new Error('Stable identity unavailable; reconnect required.');
+    }
+    const info = await client.getTokenInfo(access.token);
+    if (
+      ![GMAIL_SEND_SCOPE, GMAIL_METADATA_SCOPE].every((scope) =>
+        info.scopes.includes(scope),
+      )
+    ) {
+      throw new Error('Required Gmail permissions unavailable.');
+    }
+    const ticket = await client.verifyIdToken({
+      idToken: client.credentials.id_token,
+      audience: this.clientId,
+    });
+    const identity = ticket.getPayload();
+    if (!identity?.sub || !identity.email || !identity.email_verified) {
+      throw new Error('Verified identity unavailable; reconnect required.');
+    }
+
+    return { email: identity.email, googleSubject: identity.sub };
   }
 
   async accessToken(refreshToken: string): Promise<string> {
@@ -74,6 +102,16 @@ export class GmailClient implements IGmailClient {
     const result = await client.getAccessToken();
 
     if (!result.token) throw new Error('Gmail authorization is unavailable.');
+    const info = await client.getTokenInfo(result.token);
+    if (
+      ![GMAIL_SEND_SCOPE, GMAIL_METADATA_SCOPE].every((scope) =>
+        info.scopes.includes(scope),
+      )
+    ) {
+      throw new Error(
+        'Gmail send or metadata permission is unavailable. Reconnect this mailbox.',
+      );
+    }
 
     return result.token;
   }

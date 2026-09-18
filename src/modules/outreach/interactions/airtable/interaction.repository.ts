@@ -19,6 +19,7 @@ import type {
   SentConfirmation,
   HistoryInteraction,
   FollowUpDraft,
+  SendingInteraction,
 } from '../types';
 import type { IAirtableClient } from '@/infrastructure/airtable/interfaces/client.interface';
 
@@ -67,7 +68,7 @@ export class InteractionRepository implements IInteractionRepository {
   }
 
   async confirmSent(id: string, confirmation: SentConfirmation) {
-    const { sentAt, gmailMessageId, gmailThreadId } = confirmation;
+    const { sentAt, gmailMessageId, gmailThreadId, mailboxId } = confirmation;
     const result = mapInteractionCompletion(
       recordSchema.parse(
         await this.client.request(
@@ -80,6 +81,7 @@ export class InteractionRepository implements IInteractionRepository {
                 [field.sentAt]: sentAt,
                 [field.gmailMessageId]: gmailMessageId,
                 [field.gmailThreadId]: gmailThreadId,
+                [field.mailbox]: [mailboxId],
               },
             }),
           },
@@ -92,6 +94,8 @@ export class InteractionRepository implements IInteractionRepository {
       result.status !== 'Completed' ||
       result.gmailMessageId !== gmailMessageId ||
       result.gmailThreadId !== gmailThreadId ||
+      result.mailboxIds.length !== 1 ||
+      result.mailboxIds[0] !== mailboxId ||
       Date.parse(result.sentAt) !== Date.parse(sentAt)
     ) {
       throw new Error(
@@ -110,6 +114,19 @@ export class InteractionRepository implements IInteractionRepository {
     recordsSchema.parse(
       await this.client.request(`${INTERACTION_TABLE}?${query}`),
     );
+  }
+
+  async findById(id: string): Promise<SendingInteraction> {
+    const record = recordSchema.parse(
+      await this.client.request(
+        `${INTERACTION_TABLE}/${encodeURIComponent(id)}`,
+      ),
+    );
+    if (record.id !== id) {
+      throw new Error('Airtable returned a different root Interaction.');
+    }
+
+    return mapDraftCandidate(record);
   }
 
   async findHistoryByIds(ids: string[]) {
@@ -163,6 +180,9 @@ export class InteractionRepository implements IInteractionRepository {
       saved.gmailThreadId !== draft.gmailThreadId ||
       saved.gmailMessageId ||
       saved.sentAt ||
+      saved.mailboxIds.length !== 0 ||
+      saved.initialInteractionIds.length !== 1 ||
+      saved.initialInteractionIds[0] !== draft.initialInteractionId ||
       saved.prospectIds.length !== 1 ||
       saved.prospectIds[0] !== draft.prospectId
     )
