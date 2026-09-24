@@ -7,6 +7,8 @@ import type {
 } from '../types';
 
 export interface IDraftQueueRepository {
+  listDrafts(startedAt: string): Promise<DraftCandidate[]>;
+  findHistoryByIds(ids: string[]): Promise<HistoryInteraction[]>;
   findNextDraft(
     startedAt: string,
     excluded: ReadonlySet<string>,
@@ -14,6 +16,7 @@ export interface IDraftQueueRepository {
   confirmSent(id: string, confirmation: SentConfirmation): Promise<void>;
   checkConnection(): Promise<void>;
   findById(id: string): Promise<SendingInteraction>;
+  findDraftById(id: string): Promise<DraftCandidate | null>;
 }
 
 export interface IFollowUpDraftRepository {

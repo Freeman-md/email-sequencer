@@ -42,7 +42,7 @@ const initial: HistoryInteraction = {
 const followup: HistoryInteraction = {
   ...initial,
   id: 'recFollowup',
-  type: 'Follow-up',
+  type: 'Follow-up 1',
   initialInteractionIds: [initial.id],
   sentAt: '2026-09-04T12:00:00Z',
   gmailMessageId: 'message2',
@@ -51,7 +51,34 @@ const assess = (history: HistoryInteraction[], person = prospect) =>
   assessFollowUp(person, history, FOLLOW_UP_STEPS, now);
 
 describe('follow-up eligibility', () => {
-  it('uses inclusive delay from the latest Sent At and advances without per-step branches', () => {
+  it('accepts exact numbered history and blocks gaps or duplicate numbering', () => {
+    expect(
+      assess([initial, { ...followup, type: 'Follow-up 1' }]).due?.step.number,
+    ).toBe(2);
+    expect(assess([initial, { ...followup, type: 'Follow-up 2' }]).reason).toBe(
+      'Ambiguous or non-consecutive follow-up numbering',
+    );
+    expect(
+      assess([
+        initial,
+        { ...followup, type: 'Follow-up 1' },
+        {
+          ...followup,
+          id: 'recDuplicate',
+          type: 'Follow-up 1',
+          sentAt: '2026-09-08T12:00:00Z',
+        },
+      ]).reason,
+    ).toBe('Ambiguous or non-consecutive follow-up numbering');
+  });
+
+  it('excludes generic historical Follow-up records as unsupported', () => {
+    expect(assess([initial, { ...followup, type: 'Follow-up' }]).reason).toBe(
+      'Unsupported outbound email Type',
+    );
+  });
+
+  it('uses inclusive delay from the latest Sent At and completes after step three', () => {
     expect(
       assessFollowUp(
         prospect,
@@ -70,21 +97,20 @@ describe('follow-up eligibility', () => {
     const sequence = [
       initial,
       followup,
-      { ...followup, id: 'recThree', sentAt: '2026-09-05T12:00:00Z' },
-      { ...followup, id: 'recFour', sentAt: '2026-09-06T12:00:00Z' },
+      {
+        ...followup,
+        id: 'recThree',
+        type: 'Follow-up 2',
+        sentAt: '2026-09-05T12:00:00Z',
+      },
+      {
+        ...followup,
+        id: 'recFour',
+        type: 'Follow-up 3',
+        sentAt: '2026-09-06T12:00:00Z',
+      },
     ];
     expect(assess(sequence).reason).toBe('Sequence complete');
-    expect(
-      assessFollowUp(
-        prospect,
-        sequence,
-        [
-          ...FOLLOW_UP_STEPS,
-          { number: 4, waitDays: 1, guidance: 'Fourth step' },
-        ],
-        now,
-      ).due?.step.number,
-    ).toBe(4);
   });
   it.each([
     [
@@ -353,6 +379,7 @@ describe('preparation workflow', () => {
       message: 'A short, relevant follow-up.',
       gmailThreadId: initial.gmailThreadId,
       initialInteractionId: initial.id,
+      type: 'Follow-up 1',
     });
     expect(prospects.findContextById).toHaveBeenCalledTimes(2);
     expect(generator.generate).toHaveBeenCalledWith(

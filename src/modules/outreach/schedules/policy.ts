@@ -99,6 +99,10 @@ function localParts(now: Date, timezone: string) {
   };
 }
 
+export function scheduleLocalDate(schedule: Schedule, now: Date): string {
+  return localParts(now, schedule.timezone).date;
+}
+
 export function windowOpen(schedule: Schedule, now: Date): boolean {
   const local = localParts(now, schedule.timezone);
 

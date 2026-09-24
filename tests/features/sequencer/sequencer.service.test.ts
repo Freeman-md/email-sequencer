@@ -1,5 +1,10 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
+import {
+  allocateMailbox,
+  conversationRootId,
+  resolveFollowUpMailbox,
+} from '@/features/sequencer/server/policies/sender';
 import { SequencerRuntime } from '@/features/sequencer/server/runtime/sequencer-runtime';
 import { SequencerService } from '@/features/sequencer/server/services/sequencer.service';
 import {
@@ -8,6 +13,7 @@ import {
 } from '@/modules/outreach/schedules';
 
 import type { Interaction } from '@/features/sequencer/server/types/interaction';
+import type { ISendingQueue } from '@/features/sequencer/server/types/queue';
 import type { SendResult } from '@/infrastructure/email/types/send-result';
 import type { AttemptState } from '@/infrastructure/send-attempts/store';
 import type { DraftCandidate } from '@/modules/outreach/interactions';
@@ -112,6 +118,91 @@ function setup(intervalSeconds = 1) {
     }),
   };
   const findById = vi.fn();
+  const excluded = new Set<string>();
+  let cutoff = startedAt;
+  const queue: ISendingQueue = {
+    prepare: vi.fn(async (_schedule, runStartedAt) => {
+      cutoff = runStartedAt;
+      excluded.clear();
+    }),
+    takeIssues: vi.fn(() => []),
+    next: vi.fn(async () => {
+      const draft = await findNextDraft(cutoff, new Set(excluded));
+      if (!draft) return null;
+      excluded.add(draft.id);
+      if (Date.parse(draft.createdAt) > Date.parse(cutoff)) {
+        throw new Error('Draft is newer than the fixed run cutoff.');
+      }
+
+      try {
+        conversationRootId(draft);
+      } catch (error) {
+        return {
+          rejected: {
+            interactionId: draft.id,
+            message: (error as Error).message,
+          },
+        };
+      }
+      if (draft.prospectIds.length !== 1) {
+        return {
+          rejected: {
+            interactionId: draft.id,
+            message: 'Draft must link to exactly one Prospect.',
+          },
+        };
+      }
+      const prospect = await findContactById(draft.prospectIds[0]);
+      if (prospect.doNotContact || !prospect.email) {
+        return {
+          rejected: {
+            interactionId: draft.id,
+            message: prospect.doNotContact
+              ? 'Prospect is marked Do Not Contact.'
+              : 'Prospect email is missing or invalid.',
+          },
+        };
+      }
+      const state = await mailboxes.getState();
+      let selected = allocateMailbox(
+        state.mailboxes,
+        (await attempts.read()).lastAllocatedMailboxId,
+      );
+      let root;
+      if (draft.type !== 'Initial Message') {
+        root = await findById(draft.initialInteractionIds[0]);
+
+        try {
+          selected = resolveFollowUpMailbox(draft, root, state.mailboxes);
+        } catch (error) {
+          return {
+            rejected: {
+              interactionId: draft.id,
+              message: (error as Error).message,
+            },
+          };
+        }
+      }
+
+      return {
+        draft,
+        prospect: { ...prospect, interactionIds: [] },
+        category: root ? ('followUp1' as const) : ('initial' as const),
+        queuedAt: Date.parse(draft.createdAt),
+        root,
+        mailbox: selected,
+        dayKey: 'synthetic-day',
+        ...(root ? { originalMessageId: root.gmailMessageId } : {}),
+      };
+    }),
+    assertSubmissionAllowed: vi.fn(),
+  };
+  const progress = {
+    read: vi.fn(),
+    prepareDay: vi.fn(),
+    advance: vi.fn(),
+    recordConfirmed: vi.fn(),
+  };
 
   return {
     state,
@@ -126,15 +217,16 @@ function setup(intervalSeconds = 1) {
     attempts,
     mailboxes,
     findById,
+    queue,
     runner: new SequencerService(
-      { findNextDraft, confirmSent, findById, checkConnection: vi.fn() },
-      { findContactById, checkConnection: vi.fn() },
+      { confirmSent, findById },
       { send },
       { requireReady: check, getState: vi.fn() },
       runtime,
-      mailboxes,
       attempts,
       schedules,
+      progress,
+      queue,
     ),
   };
 }
@@ -151,6 +243,71 @@ it('blocks manual starts without a valid selected window and before reading draf
   expect(send).not.toHaveBeenCalled();
   expect(findNextDraft).not.toHaveBeenCalled();
   expect(runner.snapshot().errors[0]?.message).toContain('No schedule');
+});
+
+it('accounts a reconciled confirmed send once before resolving its journal entry', async () => {
+  const pending = {
+    id: 'attempt-reconcile',
+    interactionId: 'recSent',
+    mailboxId: 'recMailboxA',
+    mailboxEmail: 'operator@example.com',
+    reservedAt: startedAt,
+    queueCategory: 'followUp2' as const,
+    queueDayKey: 'recSchedule:Europe/London:2026-09-09',
+    confirmation: {
+      sentAt: startedAt,
+      gmailMessageId: 'message-id',
+      gmailThreadId: 'thread-id',
+    },
+  };
+  const attempts = {
+    read: vi.fn().mockResolvedValue({
+      version: 1,
+      pending,
+      lastAllocatedMailboxId: null,
+    }),
+    reserve: vi.fn(),
+    confirm: vi.fn(),
+    resolve: vi.fn(),
+  };
+  const progress = {
+    read: vi.fn(),
+    prepareDay: vi.fn(),
+    advance: vi.fn(),
+    recordConfirmed: vi.fn(),
+  };
+  const completed = {
+    ...candidate,
+    id: pending.interactionId,
+    type: 'Follow-up 2',
+    status: 'Completed',
+    sentAt: startedAt,
+    gmailMessageId: 'message-id',
+    gmailThreadId: 'thread-id',
+    mailboxIds: [pending.mailboxId],
+  };
+  const runner = new SequencerService(
+    {
+      confirmSent: vi.fn(),
+      findById: vi.fn().mockResolvedValue(completed),
+    },
+    { send: vi.fn() },
+    { requireReady: vi.fn(), getState: vi.fn() },
+    new SequencerRuntime(),
+    attempts,
+    { capture: vi.fn(), verify: vi.fn(), status: vi.fn(), claim: vi.fn() },
+    progress,
+    {
+      prepare: vi.fn(),
+      takeIssues: vi.fn(() => []),
+      next: vi.fn(),
+      assertSubmissionAllowed: vi.fn(),
+    },
+  );
+
+  await runner.reconcile(pending.id, 'sent');
+  expect(progress.recordConfirmed).toHaveBeenCalledOnce();
+  expect(attempts.resolve).toHaveBeenCalledWith(pending.id);
 });
 
 it('wakes the interval at exclusive closing without fetching or submitting another draft', async () => {
@@ -336,7 +493,7 @@ it('uses the root mailbox for follow-ups without advancing allocation', async ()
   state.lastAllocatedMailboxId = 'recMailboxB';
   const draft = {
     ...candidate,
-    type: 'Follow-up',
+    type: 'Follow-up 1',
     gmailThreadId: 'thread-id',
     initialInteractionIds: ['recRoot'],
   };
@@ -394,13 +551,14 @@ it.each([
   'self-root',
   'preassigned-sender',
   'unsupported-type',
+  'generic-follow-up',
 ])(
   'rejects an ambiguous outbound draft with %s without reserving or sending',
   async (failure) => {
     const { runner, findNextDraft, send, attempts, confirmSent } = setup();
     const draft = {
       ...candidate,
-      type: 'Follow-up',
+      type: 'Follow-up 1',
       gmailThreadId: 'thread-id',
       initialInteractionIds: ['recRoot'],
     };
@@ -418,6 +576,9 @@ it.each([
     }
     if (failure === 'unsupported-type') {
       draft.type = 'Reply';
+    }
+    if (failure === 'generic-follow-up') {
+      draft.type = 'Follow-up';
     }
     findNextDraft
       .mockReset()
@@ -444,7 +605,7 @@ it.each([
     .mockReset()
     .mockResolvedValueOnce({
       ...candidate,
-      type: 'Follow-up',
+      type: 'Follow-up 1',
       gmailThreadId: 'thread-id',
       initialInteractionIds: ['recRoot'],
     })
@@ -565,10 +726,12 @@ describe('one-at-a-time run lifecycle', () => {
     runner.start();
     await flush();
     expect(findNextDraft).toHaveBeenCalledTimes(1);
-    expect(send).toHaveBeenCalledWith({
-      ...interaction,
-      beforeSubmit: expect.any(Function),
-    });
+    expect(send).toHaveBeenCalledWith(
+      expect.objectContaining({
+        ...interaction,
+        beforeSubmit: expect.any(Function),
+      }),
+    );
     expect(confirmSent).toHaveBeenCalledWith(interaction.id, {
       mailboxId: interaction.mailboxId,
       sentAt: '2026-09-09T12:00:01.000Z',

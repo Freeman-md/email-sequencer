@@ -81,6 +81,44 @@ describe('Airtable contract', () => {
     expect(request.mock.calls[1]?.[0]).toBe(`${PROSPECT_TABLE}/recProspect`);
   });
 
+  it('pages the full fixed-cutoff draft projection for queue planning', async () => {
+    const request = vi
+      .fn()
+      .mockResolvedValueOnce({ records: [record], offset: 'next-page' })
+      .mockResolvedValueOnce({
+        records: [{ ...record, id: 'recSecond' }],
+      });
+    const repository = new InteractionRepository({ request });
+
+    expect(await repository.listDrafts(cutoff)).toHaveLength(2);
+    const firstQuery = JSON.parse(request.mock.calls[0]?.[1].body);
+    const secondQuery = JSON.parse(request.mock.calls[1]?.[1].body);
+    expect(firstQuery).toMatchObject({
+      pageSize: 100,
+      sort: [{ field: 'Created At', direction: 'asc' }],
+    });
+    expect(firstQuery.filterByFormula).toContain(
+      `{Created At}<=DATETIME_PARSE('${cutoff}')`,
+    );
+    expect(secondQuery.offset).toBe('next-page');
+  });
+
+  it('reloads a queue draft by record ID and represents deletion explicitly', async () => {
+    const request = vi
+      .fn()
+      .mockResolvedValueOnce({ records: [record] })
+      .mockResolvedValueOnce({ records: [] });
+    const repository = new InteractionRepository({ request });
+
+    await expect(repository.findDraftById(record.id)).resolves.toMatchObject({
+      id: record.id,
+      status: 'Draft',
+    });
+    const query = JSON.parse(request.mock.calls[0]?.[1].body);
+    expect(query.filterByFormula).toBe("RECORD_ID()='recFirst'");
+    await expect(repository.findDraftById(record.id)).resolves.toBeNull();
+  });
+
   it('rejects malformed field values instead of treating them as empty fields', async () => {
     const request = vi
       .fn()

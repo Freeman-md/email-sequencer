@@ -159,6 +159,31 @@ export class SequencerRuntime {
     this.state.nextSendAt = null;
   }
 
+  async waitUntil(permittedAt: Date, closesAt: Date) {
+    if (this.stopping) {
+      return;
+    }
+
+    this.state.phase = 'waiting';
+    const wakeAt = Math.min(permittedAt.getTime(), closesAt.getTime());
+    const duration = Math.max(0, wakeAt - this.now().getTime());
+    this.state.nextSendAt = new Date(wakeAt).toISOString();
+
+    await new Promise<void>((resolve) => {
+      const timer = setTimeout(() => {
+        this.wake = undefined;
+        resolve();
+      }, duration);
+
+      this.wake = () => {
+        clearTimeout(timer);
+        this.wake = undefined;
+        resolve();
+      };
+    });
+    this.state.nextSendAt = null;
+  }
+
   finish() {
     if (this.stopping && this.state.status !== 'error')
       this.state.status = 'idle';

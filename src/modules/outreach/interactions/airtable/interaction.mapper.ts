@@ -56,7 +56,7 @@ export function draftFields(draft: FollowUpDraft) {
   return {
     [field.direction]: 'Outbound',
     [field.channel]: 'Email',
-    [field.type]: 'Follow-up',
+    [field.type]: draft.type,
     [field.status]: 'Draft',
     [field.subject]: draft.subject,
     [field.message]: draft.message,

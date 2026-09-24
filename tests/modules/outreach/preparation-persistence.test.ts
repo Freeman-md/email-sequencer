@@ -94,7 +94,7 @@ it('creates a linked Draft with the original subject/thread and no send identifi
   const fields = {
     Direction: 'Outbound',
     Channel: 'Email',
-    Type: 'Follow-up',
+    Type: 'Follow-up 1',
     Status: 'Draft',
     Subject: 'Original',
     Message: 'Follow-up body',
@@ -111,6 +111,7 @@ it('creates a linked Draft with the original subject/thread and no send identifi
     message: 'Follow-up body',
     gmailThreadId: 'thread1',
     initialInteractionId: 'recInitial',
+    type: 'Follow-up 1',
   });
   expect(JSON.parse(request.mock.calls[0]?.[1].body)).toEqual({ fields });
   request.mockResolvedValue({
@@ -124,6 +125,7 @@ it('creates a linked Draft with the original subject/thread and no send identifi
       message: 'Follow-up body',
       gmailThreadId: 'thread1',
       initialInteractionId: 'recInitial',
+      type: 'Follow-up 1',
     }),
   ).rejects.toThrow('did not confirm');
 });

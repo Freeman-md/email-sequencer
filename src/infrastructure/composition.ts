@@ -12,6 +12,7 @@ import { MailboxGmailService } from './gmail/mailbox-service';
 import { MailboxTokenStore } from './gmail/mailbox-token-store';
 import { OpenAIClient } from './openai/client';
 import { FileSendAttemptStore } from './send-attempts/store';
+import { FileSendingProgressStore } from './sending-progress/store';
 
 function composeInfrastructure() {
   const config = getConfig();
@@ -35,15 +36,20 @@ function composeInfrastructure() {
     /* turbopackIgnore: true */ config.SEND_ATTEMPT_FILE ??
       `${legacyPath}.attempts`,
   );
-  if ([legacyPath, credentialPath].includes(attemptPath)) {
+  const progressPath = `${attemptPath}.progress`;
+  if (
+    [legacyPath, credentialPath].includes(attemptPath) ||
+    [legacyPath, credentialPath, attemptPath].includes(progressPath)
+  ) {
     throw new Error(
-      'SEND_ATTEMPT_FILE must be separate from Gmail credential storage.',
+      'Send attempt and progress files must be separate from Gmail credential storage and each other.',
     );
   }
   const mailboxTokens = new MailboxTokenStore(credentialPath, legacyPath);
   const gmail = new MailboxGmailService(gmailClient, mailboxTokens);
   const authorization = new GmailAuthorization(gmailClient);
   const attempts = new FileSendAttemptStore(attemptPath);
+  const progress = new FileSendingProgressStore(progressPath);
 
   const textGenerator = new OpenAIClient({
     apiKey: config.EMAIL_SEQUENCER_OPENAI_API_KEY ?? '',
@@ -57,6 +63,7 @@ function composeInfrastructure() {
     mailboxTokens,
     authorization,
     attempts,
+    progress,
     textGenerator,
   };
 }

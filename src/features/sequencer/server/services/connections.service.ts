@@ -11,7 +11,10 @@ export class ConnectionsService implements IConnectionsService {
   private cache?: { expires: number; value: Promise<ConnectionState> };
 
   constructor(
-    private readonly interactions: IDraftQueueRepository,
+    private readonly interactions: Pick<
+      IDraftQueueRepository,
+      'checkConnection'
+    >,
     private readonly prospects: IProspectContactRepository,
     private readonly mailboxes: ISenderMailboxes,
     private readonly now: () => number = Date.now,

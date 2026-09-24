@@ -2,6 +2,8 @@ import 'server-only';
 
 import { recordsSchema, recordSchema } from '@/infrastructure/airtable/schemas';
 
+import { INITIAL_MESSAGE_TYPE } from '../types';
+
 import {
   INTERACTION_TABLE,
   INTERACTION_FIELDS as field,
@@ -68,6 +70,38 @@ export class InteractionRepository implements IInteractionRepository {
     return record ? mapDraftCandidate(record) : null;
   }
 
+  async listDrafts(runStartedAt: string) {
+    const drafts: SendingInteraction[] = [];
+    const seenOffsets = new Set<string>();
+    let offset: string | undefined;
+
+    do {
+      const query = eligibleQuery(runStartedAt, new Set());
+      const data = recordsSchema.parse(
+        await this.client.request(`${INTERACTION_TABLE}/listRecords`, {
+          method: 'POST',
+          body: JSON.stringify({
+            ...query,
+            maxRecords: undefined,
+            pageSize: 100,
+            ...(offset ? { offset } : {}),
+          }),
+        }),
+      );
+      drafts.push(...data.records.map(mapDraftCandidate));
+      offset = data.offset;
+
+      if (offset && seenOffsets.has(offset)) {
+        throw new Error('Draft queue pagination repeated. Sending blocked.');
+      }
+      if (offset) {
+        seenOffsets.add(offset);
+      }
+    } while (offset);
+
+    return drafts;
+  }
+
   async confirmSent(id: string, confirmation: SentConfirmation) {
     const { sentAt, gmailMessageId, gmailThreadId, mailboxId } = confirmation;
     const result = mapInteractionCompletion(
@@ -130,12 +164,29 @@ export class InteractionRepository implements IInteractionRepository {
     return mapDraftCandidate(record);
   }
 
+  async findDraftById(id: string) {
+    const data = recordsSchema.parse(
+      await this.client.request(`${INTERACTION_TABLE}/listRecords`, {
+        method: 'POST',
+        body: JSON.stringify({
+          maxRecords: 1,
+          pageSize: 1,
+          filterByFormula: `RECORD_ID()=${literal(id)}`,
+          fields: Object.values(field),
+        }),
+      }),
+    );
+    const record = data.records[0];
+
+    return record ? mapDraftCandidate(record) : null;
+  }
+
   async pageFollowUpCandidateProspects(offset?: string) {
     const conditions = [
       `{${field.channel}}='Email'`,
       `{${field.direction}}='Outbound'`,
       `{${field.status}}='Completed'`,
-      `{${field.type}}='Initial Message'`,
+      `{${field.type}}='${INITIAL_MESSAGE_TYPE}'`,
       `{${field.mailbox}}!=BLANK()`,
     ];
     const data = recordsSchema.parse(
@@ -201,7 +252,7 @@ export class InteractionRepository implements IInteractionRepository {
       saved.status !== 'Draft' ||
       saved.direction !== 'Outbound' ||
       saved.channel !== 'Email' ||
-      saved.type !== 'Follow-up' ||
+      saved.type !== draft.type ||
       saved.subject !== draft.subject ||
       saved.message !== draft.message ||
       saved.gmailThreadId !== draft.gmailThreadId ||

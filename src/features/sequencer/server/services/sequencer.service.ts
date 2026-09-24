@@ -7,47 +7,40 @@ import {
   windowClosesAt,
 } from '@/modules/outreach/schedules';
 
-import {
-  allocateMailbox,
-  conversationRootId,
-  resolveFollowUpMailbox,
-} from '../policies/sender';
-
 import type { DashboardState, InteractionSummary } from '../../types';
 import type { IConnectionsService } from '../interfaces/connections-service.interface';
-import type {
-  ISenderMailboxes,
-  SenderMailbox,
-} from '../interfaces/mailboxes.interface';
 import type { ISequencerService } from '../interfaces/sequencer-service.interface';
 import type { SequencerRuntime } from '../runtime/sequencer-runtime';
 import type { Interaction } from '../types/interaction';
+import type { ISendingQueue } from '../types/queue';
 import type { EmailSender } from '@/infrastructure/email/interfaces/sender.interface';
 import type { SendResult } from '@/infrastructure/email/types/send-result';
 import type {
   ISendAttemptStore,
   SendAttempt,
 } from '@/infrastructure/send-attempts/store';
+import type { ISendingProgressStore } from '@/infrastructure/sending-progress/store';
 import type {
-  DraftCandidate,
   SendingInteraction,
   IDraftQueueRepository,
 } from '@/modules/outreach/interactions';
-import type { IProspectContactRepository } from '@/modules/outreach/prospects';
 import type { ISendingSchedule, Schedule } from '@/modules/outreach/schedules';
 
 class RunStoppedBeforeSubmissionError extends Error {}
 
 export class SequencerService implements ISequencerService {
   constructor(
-    private readonly interactions: IDraftQueueRepository,
-    private readonly prospects: IProspectContactRepository,
+    private readonly interactions: Pick<
+      IDraftQueueRepository,
+      'confirmSent' | 'findById'
+    >,
     private readonly sender: EmailSender,
     private readonly connections: IConnectionsService,
     private readonly runtime: SequencerRuntime,
-    private readonly mailboxes: ISenderMailboxes,
     private readonly attempts: ISendAttemptStore,
     private readonly schedules: ISendingSchedule,
+    private readonly progress: ISendingProgressStore,
+    private readonly queue: ISendingQueue,
     private readonly now: () => Date = () => new Date(),
   ) {}
 
@@ -105,6 +98,14 @@ export class SequencerService implements ISequencerService {
       if (outcome === 'sent') {
         const saved = await this.interactions.findById(pending.interactionId);
         this.verifyReconciledCompletion(saved, pending);
+        await this.recordProgress({
+          ...pending,
+          confirmation: pending.confirmation ?? {
+            sentAt: saved.sentAt,
+            gmailMessageId: saved.gmailMessageId,
+            gmailThreadId: saved.gmailThreadId,
+          },
+        });
       }
       await this.attempts.resolve(pending.id);
     } finally {
@@ -137,152 +138,6 @@ export class SequencerService implements ISequencerService {
     }
   }
 
-  private async nextInteraction(
-    runStartedAt: string,
-    schedule: Schedule,
-  ): Promise<Interaction | null> {
-    // Recipient email lives on a linked table, so resolve one candidate at a time.
-    while (!this.runtime.isStopping()) {
-      this.assertRunWindowOpen(schedule);
-      const excluded = this.runtime.excludedIds();
-      const candidate = await this.interactions.findNextDraft(
-        runStartedAt,
-        excluded,
-      );
-
-      if (this.runtime.isStopping() || !candidate) {
-        return null;
-      }
-      this.assertRunWindowOpen(schedule);
-      const prospectId = this.validateQueueCandidate(
-        candidate,
-        runStartedAt,
-        excluded,
-      );
-      this.runtime.exclude(candidate.id);
-      const prospect = await this.prospects.findContactById(prospectId);
-
-      if (this.runtime.isStopping()) {
-        return null;
-      }
-      this.assertRunWindowOpen(schedule);
-      if (prospect.doNotContact) {
-        this.runtime.rejected({
-          kind: 'definite',
-          interactionId: candidate.id,
-          message:
-            'Prospect is marked Do Not Contact. Draft unchanged; no email sent.',
-        });
-        continue;
-      }
-      if (
-        !prospect.email ||
-        !candidate.subject.trim() ||
-        !candidate.message.trim()
-      ) {
-        continue;
-      }
-
-      const sender = await this.resolveConversationSender(candidate);
-      if (!sender) {
-        continue;
-      }
-      if (this.runtime.isStopping()) {
-        return null;
-      }
-
-      return {
-        id: candidate.id,
-        prospect: prospect.name || prospect.email,
-        company: prospect.company,
-        email: prospect.email,
-        subject: candidate.subject,
-        message: candidate.message,
-        gmailThreadId: candidate.gmailThreadId || undefined,
-        isFollowUp: candidate.type === 'Follow-up',
-        createdAt: candidate.createdAt,
-        mailboxId: sender.mailbox.id,
-        mailboxEmail: sender.mailbox.email,
-        ...(sender.originalMessageId
-          ? { gmailOriginalMessageId: sender.originalMessageId }
-          : {}),
-      };
-    }
-
-    return null;
-  }
-
-  private validateQueueCandidate(
-    candidate: DraftCandidate,
-    runStartedAt: string,
-    excluded: ReadonlySet<string>,
-  ): string {
-    if (
-      excluded.has(candidate.id) ||
-      !Number.isFinite(Date.parse(candidate.createdAt)) ||
-      Date.parse(candidate.createdAt) > Date.parse(runStartedAt) ||
-      candidate.status !== 'Draft' ||
-      candidate.direction !== 'Outbound' ||
-      candidate.channel !== 'Email'
-    ) {
-      throw new Error(
-        `Airtable returned an ineligible or already processed Interaction (${candidate.id}). Run stopped without sending.`,
-      );
-    }
-    const [prospectId] = candidate.prospectIds;
-    if (candidate.prospectIds.length !== 1 || !prospectId) {
-      throw new Error(
-        `Interaction ${candidate.id} must link to exactly one Prospect. Correct the relationship before sending.`,
-      );
-    }
-
-    return prospectId;
-  }
-
-  private async resolveConversationSender(
-    candidate: DraftCandidate,
-  ): Promise<{ mailbox: SenderMailbox; originalMessageId?: string } | null> {
-    let rootId: string | undefined;
-
-    try {
-      rootId = conversationRootId(candidate);
-    } catch (error) {
-      this.rejectOwnership(candidate.id, error);
-
-      return null;
-    }
-    const state = await this.mailboxes.getState();
-    if (!rootId) {
-      const cursor = (await this.attempts.read()).lastAllocatedMailboxId;
-
-      return { mailbox: allocateMailbox(state.mailboxes, cursor) };
-    }
-
-    try {
-      const root = await this.interactions.findById(rootId);
-
-      return {
-        mailbox: resolveFollowUpMailbox(candidate, root, state.mailboxes),
-        originalMessageId: root.gmailMessageId,
-      };
-    } catch (error) {
-      this.rejectOwnership(candidate.id, error);
-
-      return null;
-    }
-  }
-
-  private rejectOwnership(interactionId: string, error: unknown) {
-    this.runtime.rejected({
-      kind: 'definite',
-      interactionId,
-      message:
-        error instanceof Error
-          ? error.message
-          : 'Original conversation cannot be verified. Draft unchanged.',
-    });
-  }
-
   private async execute(
     runStartedAt: string,
     occurrence?: { key: string; minute: number },
@@ -299,19 +154,58 @@ export class SequencerService implements ISequencerService {
         return;
       }
       const schedule = await this.prepareRunSchedule(occurrence);
+      await this.queue.prepare(schedule, runStartedAt, () =>
+        this.runtime.isStopping(),
+      );
+      for (const issue of this.queue.takeIssues()) {
+        this.runtime.rejected({ kind: 'definite', ...issue });
+      }
 
       while (!this.runtime.isStopping()) {
         await this.assertSubmissionAllowed(schedule);
         this.runtime.fetching();
-        const interaction = await this.nextInteraction(runStartedAt, schedule);
+        const queued = await this.queue.next();
 
         if (this.runtime.isStopping()) {
           break;
         }
-        if (!interaction) {
+        if (!queued) {
           this.runtime.completed();
           break;
         }
+        if ('waitUntil' in queued) {
+          await this.runtime.waitUntil(
+            queued.waitUntil,
+            windowClosesAt(schedule, this.now()),
+          );
+          continue;
+        }
+        if ('blocked' in queued) {
+          this.runtime.halt({ kind: 'system', message: queued.blocked });
+          break;
+        }
+        if ('rejected' in queued) {
+          this.runtime.rejected({ kind: 'definite', ...queued.rejected });
+          continue;
+        }
+        const interaction: Interaction = {
+          id: queued.draft.id,
+          prospect: queued.prospect.name || queued.prospect.email,
+          company: queued.prospect.company,
+          email: queued.prospect.email,
+          subject: queued.draft.subject,
+          message: queued.draft.message,
+          gmailThreadId: queued.draft.gmailThreadId || undefined,
+          isFollowUp: queued.category !== 'initial',
+          createdAt: queued.draft.createdAt,
+          mailboxId: queued.mailbox.id,
+          mailboxEmail: queued.mailbox.email,
+          queueCategory: queued.category,
+          queueDayKey: queued.dayKey,
+          ...(queued.originalMessageId
+            ? { gmailOriginalMessageId: queued.originalMessageId }
+            : {}),
+        };
 
         if (!(await this.sendInteraction(interaction, schedule))) {
           break;
@@ -409,6 +303,12 @@ export class SequencerService implements ISequencerService {
         interactionId: interaction.id,
         mailboxId: interaction.mailboxId,
         mailboxEmail: interaction.mailboxEmail,
+        ...(interaction.queueCategory
+          ? { queueCategory: interaction.queueCategory }
+          : {}),
+        ...(interaction.queueDayKey
+          ? { queueDayKey: interaction.queueDayKey }
+          : {}),
       },
       !interaction.isFollowUp,
     );
@@ -420,7 +320,10 @@ export class SequencerService implements ISequencerService {
     this.runtime.sending(summary);
     const result = await this.submit({
       ...interaction,
-      beforeSubmit: () => this.assertSubmissionAllowed(schedule),
+      beforeSubmit: async () => {
+        await this.queue.assertSubmissionAllowed(interaction);
+        await this.assertSubmissionAllowed(schedule);
+      },
     });
     if (result.kind === 'uncertain') {
       this.runtime.halt({
@@ -480,6 +383,7 @@ export class SequencerService implements ISequencerService {
         gmailThreadId: result.gmailThreadId,
         mailboxId: attempt.mailboxId,
       });
+      await this.recordProgress({ ...attempt, confirmation: result });
       await this.attempts.resolve(attempt.id);
 
       return true;
@@ -498,5 +402,28 @@ export class SequencerService implements ISequencerService {
 
       return false;
     }
+  }
+
+  private async recordProgress(attempt: SendAttempt) {
+    if (!attempt.confirmation) {
+      throw new Error('Confirmed send is missing durable Gmail identifiers.');
+    }
+    if (!attempt.queueDayKey && !attempt.queueCategory) {
+      // Version-1 attempts predate weighted queue accounting. They remain
+      // reconcilable, but must not be assigned speculative historical progress.
+      return;
+    }
+    if (!attempt.queueDayKey || !attempt.queueCategory) {
+      throw new Error(
+        'Confirmed send is missing durable queue accounting metadata. Repair progress before reconciling.',
+      );
+    }
+    await this.progress.recordConfirmed({
+      attemptId: attempt.id,
+      dayKey: attempt.queueDayKey,
+      category: attempt.queueCategory,
+      mailboxId: attempt.mailboxId,
+      sentAt: attempt.confirmation.sentAt,
+    });
   }
 }

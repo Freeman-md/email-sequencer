@@ -17,4 +17,5 @@ export {
   triggerKey,
   nextTrigger,
   sameOperationalSchedule,
+  scheduleLocalDate,
 } from './policy';

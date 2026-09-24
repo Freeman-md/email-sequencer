@@ -3,7 +3,11 @@ import 'server-only';
 import { recordSchema, recordsSchema } from '@/infrastructure/airtable/schemas';
 
 import { PROSPECT_TABLE, PROSPECT_FIELDS as field } from './fields';
-import { mapProspectContact, mapProspectContext } from './prospect.mapper';
+import {
+  mapProspectContact,
+  mapProspectContext,
+  mapProspectQueueContext,
+} from './prospect.mapper';
 
 import type { IProspectRepository } from '../interfaces/prospect-repository.interface';
 import type { IAirtableClient } from '@/infrastructure/airtable/interfaces/client.interface';
@@ -17,6 +21,10 @@ export class ProspectRepository implements IProspectRepository {
 
   async findContextById(id: string) {
     return mapProspectContext(await this.read(id));
+  }
+
+  async findQueueContextById(id: string) {
+    return mapProspectQueueContext(await this.read(id));
   }
 
   private async read(id: string) {

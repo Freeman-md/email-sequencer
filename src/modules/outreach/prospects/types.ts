@@ -13,3 +13,7 @@ export type ProspectContext = ProspectContact & {
   sources: string;
   qualificationNotes: string;
 };
+
+export type ProspectQueueContext = ProspectContact & {
+  interactionIds: string[];
+};

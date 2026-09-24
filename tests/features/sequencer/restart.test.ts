@@ -4,6 +4,7 @@ import { join } from 'node:path';
 
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 
+import { allocateMailbox } from '@/features/sequencer/server/policies/sender';
 import { SequencerRuntime } from '@/features/sequencer/server/runtime/sequencer-runtime';
 import { SequencerService } from '@/features/sequencer/server/services/sequencer.service';
 import { FileSendAttemptStore } from '@/infrastructure/send-attempts/store';
@@ -79,21 +80,10 @@ function setup(result: SendResult, persistenceFailure = false) {
     }),
   };
   const runner = new SequencerService(
-    interactions,
-    {
-      findContactById: vi.fn().mockResolvedValue({
-        id: 'recProspect',
-        email: 'recipient@example.com',
-        name: 'Recipient',
-        company: 'Example',
-        doNotContact: false,
-      }),
-      checkConnection: vi.fn(),
-    },
+    { confirmSent: interactions.confirmSent, findById: interactions.findById },
     { send },
     { requireReady: vi.fn(), getState: vi.fn() },
     new SequencerRuntime(),
-    mailboxes,
     attempts,
     {
       capture: vi.fn().mockResolvedValue({
@@ -111,6 +101,38 @@ function setup(result: SendResult, persistenceFailure = false) {
       verify: vi.fn(),
       status: vi.fn(),
       claim: vi.fn(),
+    },
+    {
+      read: vi.fn(),
+      prepareDay: vi.fn(),
+      advance: vi.fn(),
+      recordConfirmed: vi.fn(),
+    },
+    {
+      prepare: vi.fn(),
+      takeIssues: vi.fn(() => []),
+      next: vi
+        .fn()
+        .mockImplementationOnce(async () => ({
+          draft: candidate,
+          prospect: {
+            id: 'recProspect',
+            email: 'recipient@example.com',
+            name: 'Recipient',
+            company: 'Example',
+            doNotContact: false,
+            interactionIds: [],
+          },
+          category: 'initial',
+          queuedAt: Date.parse(candidate.createdAt),
+          mailbox: allocateMailbox(
+            (await mailboxes.getState()).mailboxes,
+            (await attempts.read()).lastAllocatedMailboxId,
+          ),
+          dayKey: 'synthetic-day',
+        }))
+        .mockResolvedValue(null),
+      assertSubmissionAllowed: vi.fn(),
     },
   );
   send.mockImplementation(async () => {

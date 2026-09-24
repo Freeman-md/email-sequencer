@@ -4,7 +4,11 @@ import { textField, linksField } from '@/infrastructure/airtable/record-fields';
 
 import { PROSPECT_FIELDS as field } from './fields';
 
-import type { ProspectContact, ProspectContext } from '../types';
+import type {
+  ProspectContact,
+  ProspectContext,
+  ProspectQueueContext,
+} from '../types';
 import type { AirtableRecord } from '@/infrastructure/airtable/schemas';
 
 export function mapProspectContact(record: AirtableRecord): ProspectContact {
@@ -26,5 +30,14 @@ export function mapProspectContext(record: AirtableRecord): ProspectContext {
     signal: textField(record, field.signal),
     sources: textField(record, field.sources),
     qualificationNotes: textField(record, field.qualificationNotes),
+  };
+}
+
+export function mapProspectQueueContext(
+  record: AirtableRecord,
+): ProspectQueueContext {
+  return {
+    ...mapProspectContact(record),
+    interactionIds: linksField(record, field.interactionIds),
   };
 }

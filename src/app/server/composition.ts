@@ -6,6 +6,8 @@ import { SendingScheduler } from './scheduler';
 import { SequencerRuntime } from '@/features/sequencer/server/runtime/sequencer-runtime';
 import { ConnectionsService } from '@/features/sequencer/server/services/connections.service';
 import { SequencerService } from '@/features/sequencer/server/services/sequencer.service';
+import { DailyQueue } from '@/features/sequencer/server/services/daily-queue';
+import { MailboxPacing } from '@/features/sequencer/server/services/mailbox-pacing';
 import { getInfrastructure } from '@/infrastructure';
 import { composeOutreachRepositories } from '@/modules/outreach/server';
 
@@ -17,6 +19,7 @@ function composeServices() {
     mailboxTokens,
     authorization,
     attempts,
+    progress,
   } = getInfrastructure();
   const runtime = new SequencerRuntime();
   const {
@@ -39,15 +42,23 @@ function composeServices() {
     prospects,
     mailboxes,
   );
-  const sequencer = new SequencerService(
+  const pacing = new MailboxPacing(attempts, progress);
+  const queue = new DailyQueue(
     interactions,
     prospects,
+    mailboxes,
+    pacing,
+    progress,
+  );
+  const sequencer = new SequencerService(
+    interactions,
     gmail,
     connections,
     runtime,
-    mailboxes,
     attempts,
     schedules,
+    progress,
+    queue,
   );
   const scheduler = new SendingScheduler(schedules, sequencer, (error) =>
     schedules.setSchedulerError(error),

@@ -1,6 +1,7 @@
 import 'server-only';
 
 import { TextGenerationError } from '@/infrastructure/text-generation/error';
+import { numberedFollowUpType } from '@/modules/outreach/interactions';
 
 import { initialPreparationState } from '../../types/preparation';
 import { assessFollowUp } from '../policies/follow-up-eligibility';
@@ -310,6 +311,7 @@ export class FollowUpPreparationService implements IFollowUpPreparationService {
       message,
       gmailThreadId: due.original.gmailThreadId,
       initialInteractionId: due.original.id,
+      type: numberedFollowUpType(due.step.number),
     });
   }
 

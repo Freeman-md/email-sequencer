@@ -1,5 +1,11 @@
 import { z } from 'zod';
 
+import {
+  INITIAL_MESSAGE_TYPE,
+  isFollowUpType,
+  numberedFollowUpStep,
+} from '@/modules/outreach/interactions';
+
 import type { FollowUpStep } from '../../constants/steps';
 import type { DueFollowUp } from '../types/follow-up';
 import type { HistoryInteraction } from '@/modules/outreach/interactions';
@@ -24,6 +30,9 @@ export function assessFollowUp(
   ) {
     return { reason: 'Ambiguous Interaction relationship' };
   }
+  if (hasUnsupportedOutboundEmail(history)) {
+    return { reason: 'Unsupported outbound email Type' };
+  }
 
   const outbound = completedOutboundInteractions(history);
   if (!hasReliableOutboundSentAt(outbound)) {
@@ -32,7 +41,7 @@ export function assessFollowUp(
 
   outbound.sort((a, b) => Date.parse(a.sentAt) - Date.parse(b.sentAt));
   const initialMessages = outbound.filter(
-    (item) => item.type === 'Initial Message',
+    (item) => item.type === INITIAL_MESSAGE_TYPE,
   );
   const original = initialMessages[0];
   if (!original) {
@@ -43,6 +52,9 @@ export function assessFollowUp(
   }
 
   const sequence = outbound;
+  if (!hasConsecutiveFollowUpTypes(sequence)) {
+    return { reason: 'Ambiguous or non-consecutive follow-up numbering' };
+  }
   if (
     original.mailboxIds.length !== 1 ||
     original.initialInteractionIds.length !== 0
@@ -57,7 +69,7 @@ export function assessFollowUp(
       (item) =>
         item.mailboxIds.length !== 1 ||
         item.mailboxIds[0] !== original.mailboxIds[0] ||
-        (item.type === 'Follow-up' &&
+        (isFollowUpType(item.type) &&
           (item.initialInteractionIds.length !== 1 ||
             item.initialInteractionIds[0] !== original.id)),
     )
@@ -96,7 +108,7 @@ export function assessFollowUp(
   }
 
   const number =
-    sequence.filter((item) => item.type === 'Follow-up').length + 1;
+    sequence.filter((item) => isFollowUpType(item.type)).length + 1;
   const step = steps.find((step) => step.number === number);
   if (!step) {
     return { reason: 'Sequence complete' };
@@ -126,7 +138,7 @@ function completedOutboundInteractions(history: HistoryInteraction[]) {
       item.channel === 'Email' &&
       item.direction === 'Outbound' &&
       item.status === 'Completed' &&
-      ['Initial Message', 'Follow-up'].includes(item.type),
+      (item.type === INITIAL_MESSAGE_TYPE || isFollowUpType(item.type)),
   );
 }
 
@@ -166,7 +178,27 @@ function hasFollowUpDraft(history: HistoryInteraction[]) {
     (item) =>
       item.direction === 'Outbound' &&
       item.channel === 'Email' &&
-      item.type === 'Follow-up' &&
+      isFollowUpType(item.type) &&
       item.status === 'Draft',
+  );
+}
+
+function hasConsecutiveFollowUpTypes(sequence: HistoryInteraction[]) {
+  const followUps = sequence.filter((item) => isFollowUpType(item.type));
+
+  return followUps.every((item, index) => {
+    const expected = index + 1;
+
+    return numberedFollowUpStep(item.type) === expected;
+  });
+}
+
+function hasUnsupportedOutboundEmail(history: HistoryInteraction[]) {
+  return history.some(
+    (item) =>
+      item.channel === 'Email' &&
+      item.direction === 'Outbound' &&
+      item.type !== INITIAL_MESSAGE_TYPE &&
+      !isFollowUpType(item.type),
   );
 }

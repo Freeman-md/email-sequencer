@@ -1,3 +1,8 @@
+import {
+  INITIAL_MESSAGE_TYPE,
+  isFollowUpType,
+} from '@/modules/outreach/interactions';
+
 import type { SenderMailbox } from '../interfaces/mailboxes.interface';
 import type {
   DraftCandidate,
@@ -30,7 +35,7 @@ export function conversationRootId(draft: DraftCandidate): string | undefined {
       'Draft already has sender attribution, Sent At or a Gmail Message ID. Reconcile it; do not resend.',
     );
   }
-  if (draft.type === 'Initial Message') {
+  if (draft.type === INITIAL_MESSAGE_TYPE) {
     if (draft.initialInteractionIds.length || draft.gmailThreadId) {
       throw new Error(
         'Initial Message has an existing conversation link or thread. Draft unchanged; reconcile ownership.',
@@ -39,9 +44,9 @@ export function conversationRootId(draft: DraftCandidate): string | undefined {
 
     return undefined;
   }
-  if (draft.type !== 'Follow-up') {
+  if (!isFollowUpType(draft.type)) {
     throw new Error(
-      `Unsupported outbound conversation type: ${draft.type || 'missing Type'}. Only Initial Message and Follow-up may be sent.`,
+      `Unsupported outbound conversation type: ${draft.type || 'missing Type'}. Use Initial Message or an exact numbered Follow-up Type.`,
     );
   }
   if (
@@ -63,7 +68,7 @@ export function resolveFollowUpMailbox(
 ): SenderMailbox {
   if (
     root.id !== draft.initialInteractionIds[0] ||
-    root.type !== 'Initial Message' ||
+    root.type !== INITIAL_MESSAGE_TYPE ||
     root.status !== 'Completed' ||
     root.direction !== 'Outbound' ||
     root.channel !== 'Email' ||

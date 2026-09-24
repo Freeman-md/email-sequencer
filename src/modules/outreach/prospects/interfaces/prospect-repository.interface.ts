@@ -1,4 +1,8 @@
-import type { ProspectContact, ProspectContext } from '../types';
+import type {
+  ProspectContact,
+  ProspectContext,
+  ProspectQueueContext,
+} from '../types';
 
 export interface IProspectContactRepository {
   findContactById(id: string): Promise<ProspectContact>;
@@ -9,5 +13,12 @@ export interface IProspectContextRepository {
   findContextById(id: string): Promise<ProspectContext>;
 }
 
+export interface IProspectQueueRepository {
+  findQueueContextById(id: string): Promise<ProspectQueueContext>;
+}
+
 export interface IProspectRepository
-  extends IProspectContactRepository, IProspectContextRepository {}
+  extends
+    IProspectContactRepository,
+    IProspectContextRepository,
+    IProspectQueueRepository {}

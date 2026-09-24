@@ -21,6 +21,10 @@ const attemptSchema = z.object({
   mailboxEmail: z.email(),
   reservedAt: z.iso.datetime(),
   confirmation: confirmationSchema.optional(),
+  queueDayKey: z.string().min(1).optional(),
+  queueCategory: z
+    .enum(['initial', 'followUp1', 'followUp2', 'followUp3'])
+    .optional(),
 });
 const stateSchema = z.object({
   version: z.literal(1),
@@ -33,7 +37,14 @@ export type AttemptState = z.infer<typeof stateSchema>;
 export interface ISendAttemptStore {
   read(): Promise<AttemptState>;
   reserve(
-    input: Pick<SendAttempt, 'interactionId' | 'mailboxId' | 'mailboxEmail'>,
+    input: Pick<
+      SendAttempt,
+      | 'interactionId'
+      | 'mailboxId'
+      | 'mailboxEmail'
+      | 'queueDayKey'
+      | 'queueCategory'
+    >,
     advanceCursor: boolean,
   ): Promise<SendAttempt>;
   confirm(
@@ -63,7 +74,14 @@ export class FileSendAttemptStore implements ISendAttemptStore {
   }
 
   async reserve(
-    input: Pick<SendAttempt, 'interactionId' | 'mailboxId' | 'mailboxEmail'>,
+    input: Pick<
+      SendAttempt,
+      | 'interactionId'
+      | 'mailboxId'
+      | 'mailboxEmail'
+      | 'queueDayKey'
+      | 'queueCategory'
+    >,
     advanceCursor: boolean,
   ) {
     const attempt = attemptSchema.parse({
